@@ -2,7 +2,7 @@
 """
 t0rpoiz0n - Advanced Tor Transparent Proxy + MAC Spoofing Tool
 Author: 0xb0rn3 | oxbv1
-Version: 1.1.0 - Fixed browser leak protection
+Version: 1.1.1 - Fixed iptables rules
 Built for Arch Linux
 """
 
@@ -68,7 +68,7 @@ def banner():
 ║                                                            ║
 ║  Advanced Tor Transparent Proxy + MAC Spoofing Framework  ║
 ║                  Author: 0xb0rn3 | oxbv1                   ║
-║                      Version: 1.1.0                        ║
+║                      Version: 1.1.1                        ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
 {Color.RESET}""")
@@ -212,20 +212,22 @@ def grant_port_capabilities():
     print(f"{Color.GREEN}[✓] Granted port binding capabilities to Tor{Color.RESET}")
 
 def create_iptables_rules():
-    """Create iptables rules for transparent proxy with leak protection"""
+    """Create iptables rules for transparent proxy with leak protection - FIXED VERSION"""
     rules = """*nat
 :PREROUTING ACCEPT [0:0]
 :INPUT ACCEPT [0:0]
 :OUTPUT ACCEPT [0:0]
 :POSTROUTING ACCEPT [0:0]
 
-# Redirect DNS to Tor DNSPort
+# Redirect DNS to Tor DNSPort (for non-local traffic)
 -A PREROUTING ! -i lo -p udp -m udp --dport 53 -j REDIRECT --to-ports 53
+-A PREROUTING ! -i lo -p tcp -m tcp --dport 53 -j REDIRECT --to-ports 53
 
-# Redirect TCP to Tor TransPort
+# Redirect TCP to Tor TransPort (for non-local traffic)
 -A PREROUTING ! -i lo -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REDIRECT --to-ports 9040
 
-# Allow localhost
+# OUTPUT chain - redirect local traffic
+# Allow loopback
 -A OUTPUT -o lo -j RETURN
 
 # Allow LAN (optional - comment out for maximum security)
@@ -233,22 +235,14 @@ def create_iptables_rules():
 -A OUTPUT -d 10.0.0.0/8 -j RETURN
 -A OUTPUT -d 172.16.0.0/12 -j RETURN
 
-# Allow Tor user (root) - MUST be before other rules
--A OUTPUT -m owner --uid-owner root -j RETURN
+# Allow Tor process (UID 0 = root) - FIXED: use numeric UID
+-A OUTPUT -m owner --uid-owner 0 -j RETURN
 
-# Redirect ALL DNS queries to Tor (blocks DoH bypass)
+# Redirect DNS queries to Tor DNSPort
 -A OUTPUT -p udp -m udp --dport 53 -j REDIRECT --to-ports 53
 -A OUTPUT -p tcp -m tcp --dport 53 -j REDIRECT --to-ports 53
 
-# Block DNS over HTTPS (DoH) common ports
--A OUTPUT -p tcp -m tcp --dport 853 -j REJECT
--A OUTPUT -p udp -m udp --dport 853 -j REJECT
-
-# Block QUIC/HTTP3 (UDP 443) - browsers use this to bypass Tor
--A OUTPUT -p udp -m udp --dport 443 -j REJECT
--A OUTPUT -p udp -m udp --dport 80 -j REJECT
-
-# Redirect all TCP to Tor TransPort
+# Redirect all other TCP traffic to Tor TransPort
 -A OUTPUT -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REDIRECT --to-ports 9040
 
 COMMIT
@@ -256,33 +250,54 @@ COMMIT
 *filter
 :INPUT ACCEPT [0:0]
 :FORWARD DROP [0:0]
-:OUTPUT DROP [0:0]
+:OUTPUT ACCEPT [0:0]
 
-# Allow localhost
+# INPUT rules
 -A INPUT -i lo -j ACCEPT
 -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
-# Allow LAN (optional)
+# Allow LAN input (optional)
 -A INPUT -s 192.168.0.0/16 -j ACCEPT
 -A INPUT -s 10.0.0.0/8 -j ACCEPT
 -A INPUT -s 172.16.0.0/12 -j ACCEPT
 
-# OUTPUT rules - DEFAULT DROP for security
+# OUTPUT rules
+# Allow loopback
 -A OUTPUT -o lo -j ACCEPT
+
+# Allow established connections
 -A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
-# Allow Tor process (running as root)
--A OUTPUT -m owner --uid-owner root -j ACCEPT
+# Allow Tor process (UID 0) - FIXED: use numeric UID
+-A OUTPUT -m owner --uid-owner 0 -j ACCEPT
 
-# Block all other UDP (prevents leaks)
--A OUTPUT -p udp -j REJECT --reject-with icmp-port-unreachable
+# Allow DNS (will be redirected by nat table)
+-A OUTPUT -p udp -m udp --dport 53 -j ACCEPT
+-A OUTPUT -p tcp -m tcp --dport 53 -j ACCEPT
 
-# Allow only Tor-redirected TCP
+# Allow Tor ports
 -A OUTPUT -p tcp -m tcp --dport 9040 -j ACCEPT
 -A OUTPUT -p tcp -m tcp --dport 9050 -j ACCEPT
 
-# Reject everything else
--A OUTPUT -j REJECT --reject-with icmp-port-unreachable
+# Allow common Tor network ports
+-A OUTPUT -p tcp -m tcp --dport 443 -j ACCEPT
+-A OUTPUT -p tcp -m tcp --dport 80 -j ACCEPT
+-A OUTPUT -p tcp -m tcp --dport 9001 -j ACCEPT
+-A OUTPUT -p tcp -m tcp --dport 9030 -j ACCEPT
+
+# Block QUIC/HTTP3 to prevent browser bypass (UDP 443)
+-A OUTPUT -p udp -m udp --dport 443 -j REJECT --reject-with icmp-port-unreachable
+-A OUTPUT -p udp -m udp --dport 80 -j REJECT --reject-with icmp-port-unreachable
+
+# Block DNS over TLS/HTTPS (port 853)
+-A OUTPUT -p tcp -m tcp --dport 853 -j REJECT --reject-with tcp-reset
+-A OUTPUT -p udp -m udp --dport 853 -j REJECT --reject-with icmp-port-unreachable
+
+# Drop other UDP to prevent leaks
+-A OUTPUT -p udp -j DROP
+
+# Accept other TCP (will be redirected by nat table)
+-A OUTPUT -p tcp -j ACCEPT
 
 COMMIT
 """
@@ -578,7 +593,7 @@ def setup_environment():
     create_iptables_rules()
     
     # Mark setup as complete
-    CONFIG_FILE.write_text(json.dumps({'setup_complete': True, 'version': '1.1.0'}))
+    CONFIG_FILE.write_text(json.dumps({'setup_complete': True, 'version': '1.1.1'}))
     
     print(f"\n{Color.GREEN}{'='*60}{Color.RESET}")
     print(f"{Color.GREEN}{Color.BOLD}[✓] Setup Complete!{Color.RESET}")
