@@ -70,7 +70,6 @@ install_systemwide() {
     
     # Check Python
     check_python
-    
     # Copy to system location
     echo -e "${CYAN}[*] Installing to ${INSTALL_PATH}${RESET}"
     cp "${TOOL_SCRIPT}" "${INSTALL_PATH}"
