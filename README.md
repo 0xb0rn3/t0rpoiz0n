@@ -358,7 +358,7 @@ Contributions welcome! Areas for improvement:
 
 **Author:** 0xb0rn3 | oxbv1  
 **GitHub:** https://github.com/0xb0rn3/t0rpoiz0n  
-**Version:** 1.0.0
+**Version:** 1.1.0
 
 ---
 
