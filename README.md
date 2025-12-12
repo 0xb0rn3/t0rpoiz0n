@@ -3,7 +3,7 @@
 **Advanced Tor Transparent Proxy + MAC Spoofing Framework for Arch Linux**
 
 Author: **0xb0rn3 | oxbv1**  
-Version: **1.0.0**
+Version: **1.1.0**
 
 ---
 
