@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+#
+# t0rpoiz0n - Universal Installer and Runner
+# Author: 0xb0rn3 | oxbv1
+# Version: 1.0.0
+# Repository: github.com/0xb0rn3/t0rpoiz0n
+#
+
+set -e
+
+RED='\033[31m'
+GREEN='\033[32m'
+CYAN='\033[36m'
+YELLOW='\033[33m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TOOL_SCRIPT="${SCRIPT_DIR}/t0rpoiz0n.py"
+INSTALL_PATH="/usr/local/bin/t0rpoiz0n"
+
+show_banner() {
+    echo -e "${CYAN}${BOLD}"
+    cat << "EOF"
+╔════════════════════════════════════════════════════════════╗
+║                                                            ║
+║   ████████╗ ██████╗ ██████╗ ██████╗  ██████╗ ██╗███████╗ ║
+║   ╚══██╔══╝██╔═████╗██╔══██╗██╔══██╗██╔═████╗██║╚════██║ ║
+║      ██║   ██║██╔██║██████╔╝██████╔╝██║██╔██║██║    ██╔╝ ║
+║      ██║   ████╔╝██║██╔══██╗██╔═══╝ ████╔╝██║██║   ██╔╝  ║
+║      ██║   ╚██████╔╝██║  ██║██║     ╚██████╔╝██║   ██║   ║
+║      ╚═╝    ╚═════╝ ╚═╝  ╚═╝╚═╝      ╚═════╝ ╚═╝   ╚═╝   ║
+║                    ███╗   ██╗                              ║
+║                    ████╗  ██║                              ║
+║                    ██╔██╗ ██║                              ║
+║                    ██║╚██╗██║                              ║
+║                    ██║ ╚████║                              ║
+║                    ╚═╝  ╚═══╝                              ║
+║                                                            ║
+║  Advanced Tor Transparent Proxy + MAC Spoofing Framework  ║
+║                  Author: 0xb0rn3 | oxbv1                   ║
+║          Repository: github.com/0xb0rn3/t0rpoiz0n          ║
+║                                                            ║
+╚════════════════════════════════════════════════════════════╝
+EOF
+    echo -e "${RESET}"
+}
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}[✗] This tool must be run as root${RESET}"
+        echo -e "${YELLOW}[!] Usage: sudo ./run [options]${RESET}"
+        exit 1
+    fi
+}
+
+check_python() {
+    if ! command -v python3 &> /dev/null; then
+        echo -e "${YELLOW}[!] Python 3 not found${RESET}"
+        echo -e "${CYAN}[*] Installing Python...${RESET}"
+        pacman -S --noconfirm python
+        echo -e "${GREEN}[✓] Python installed${RESET}"
+    fi
+}
+
+install_systemwide() {
+    echo -e "\n${CYAN}${BOLD}[*] SYSTEMWIDE INSTALLATION${RESET}\n"
+    
+    # Check if tool script exists
+    if [[ ! -f "${TOOL_SCRIPT}" ]]; then
+        echo -e "${RED}[✗] Cannot find t0rpoiz0n.py in ${SCRIPT_DIR}${RESET}"
+        exit 1
+    fi
+    
+    # Check Python
+    check_python
+    
+    # Copy to system location
+    echo -e "${CYAN}[*] Installing to ${INSTALL_PATH}${RESET}"
+    cp "${TOOL_SCRIPT}" "${INSTALL_PATH}"
+    chmod +x "${INSTALL_PATH}"
+    echo -e "${GREEN}[✓] Installed to ${INSTALL_PATH}${RESET}"
+    
+    # Run first-time setup
+    echo -e "\n${CYAN}[*] Running first-time setup...${RESET}\n"
+    "${INSTALL_PATH}" --setup
+    
+    echo -e "\n${GREEN}${BOLD}╔════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${GREEN}${BOLD}║              SYSTEMWIDE INSTALLATION COMPLETE!             ║${RESET}"
+    echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════════════════════╝${RESET}\n"
+    
+    show_usage_systemwide
+}
+
+uninstall_systemwide() {
+    echo -e "\n${CYAN}${BOLD}[*] UNINSTALLING t0rpoiz0n${RESET}\n"
+    
+    # Stop if running
+    echo -e "${CYAN}[*] Stopping Tor service...${RESET}"
+    systemctl stop tor-t0rpoiz0n.service 2>/dev/null || true
+    systemctl disable tor-t0rpoiz0n.service 2>/dev/null || true
+    
+    # Remove files
+    echo -e "${CYAN}[*] Removing files...${RESET}"
+    rm -f "${INSTALL_PATH}"
+    rm -f /etc/systemd/system/tor-t0rpoiz0n.service
+    rm -rf /usr/share/t0rpoiz0n
+    rm -rf /var/lib/t0rpoiz0n
+    rm -rf /etc/t0rpoiz0n
+    
+    # Reload systemd
+    systemctl daemon-reload
+    
+    # Restore iptables
+    echo -e "${CYAN}[*] Restoring iptables...${RESET}"
+    iptables -F 2>/dev/null || true
+    iptables -X 2>/dev/null || true
+    iptables -t nat -F 2>/dev/null || true
+    iptables -t nat -X 2>/dev/null || true
+    iptables -P INPUT ACCEPT 2>/dev/null || true
+    iptables -P FORWARD ACCEPT 2>/dev/null || true
+    iptables -P OUTPUT ACCEPT 2>/dev/null || true
+    
+    echo -e "\n${GREEN}[✓] Uninstallation complete${RESET}\n"
+}
+
+run_local() {
+    echo -e "\n${CYAN}${BOLD}[*] RUNNING LOCALLY (NOT INSTALLED)${RESET}\n"
+    
+    # Check if tool script exists
+    if [[ ! -f "${TOOL_SCRIPT}" ]]; then
+        echo -e "${RED}[✗] Cannot find t0rpoiz0n.py in ${SCRIPT_DIR}${RESET}"
+        exit 1
+    fi
+    
+    # Check Python
+    check_python
+    
+    # Make executable
+    chmod +x "${TOOL_SCRIPT}"
+    
+    # Pass all arguments to the tool
+    echo -e "${CYAN}[*] Executing: ${TOOL_SCRIPT} $@${RESET}\n"
+    python3 "${TOOL_SCRIPT}" "$@"
+}
+
+show_usage_systemwide() {
+    echo -e "${CYAN}${BOLD}SYSTEMWIDE USAGE:${RESET}\n"
+    echo -e "  ${YELLOW}t0rpoiz0n -s${RESET}              # Start transparent proxy"
+    echo -e "  ${YELLOW}t0rpoiz0n -s -m${RESET}           # Start + change MAC"
+    echo -e "  ${YELLOW}t0rpoiz0n -s -m -v apple${RESET}  # Start + MAC as Apple"
+    echo -e "  ${YELLOW}t0rpoiz0n -c${RESET}              # Check status"
+    echo -e "  ${YELLOW}t0rpoiz0n -r${RESET}              # Change identity"
+    echo -e "  ${YELLOW}t0rpoiz0n -k${RESET}              # Stop and restore clearnet"
+    echo -e "  ${YELLOW}t0rpoiz0n -m -v samsung${RESET}   # Change MAC only\n"
+    
+    echo -e "${CYAN}MAC Vendors:${RESET} samsung, apple, huawei, nokia, google, dell, hp, asus, lenovo, motorola\n"
+}
+
+show_usage() {
+    show_banner
+    
+    echo -e "${CYAN}${BOLD}INSTALLER/RUNNER USAGE:${RESET}\n"
+    echo -e "  ${GREEN}sudo ./run --install${RESET}        # Install systemwide"
+    echo -e "  ${GREEN}sudo ./run --uninstall${RESET}      # Uninstall from system"
+    echo -e "  ${GREEN}sudo ./run [options]${RESET}        # Run locally without installing\n"
+    
+    echo -e "${CYAN}${BOLD}LOCAL EXECUTION OPTIONS:${RESET}\n"
+    echo -e "  ${YELLOW}sudo ./run -s${RESET}              # Start transparent proxy"
+    echo -e "  ${YELLOW}sudo ./run -s -m${RESET}           # Start + change MAC"
+    echo -e "  ${YELLOW}sudo ./run -s -m -v apple${RESET}  # Start + MAC as Apple"
+    echo -e "  ${YELLOW}sudo ./run -c${RESET}              # Check status"
+    echo -e "  ${YELLOW}sudo ./run -r${RESET}              # Change identity"
+    echo -e "  ${YELLOW}sudo ./run -k${RESET}              # Stop and restore clearnet"
+    echo -e "  ${YELLOW}sudo ./run -m -v samsung${RESET}   # Change MAC only\n"
+    
+    echo -e "${CYAN}${BOLD}RECOMMENDED:${RESET}"
+    echo -e "  1. Install systemwide: ${GREEN}sudo ./run --install${RESET}"
+    echo -e "  2. Then use: ${GREEN}t0rpoiz0n -s${RESET} from anywhere\n"
+    
+    echo -e "${CYAN}Repository:${RESET} github.com/0xb0rn3/t0rpoiz0n"
+    echo -e "${CYAN}Author:${RESET} 0xb0rn3 | oxbv1\n"
+}
+
+main() {
+    # No arguments - show usage
+    if [[ $# -eq 0 ]]; then
+        show_usage
+        exit 0
+    fi
+    
+    # Check root for all operations
+    check_root
+    
+    # Handle special commands
+    case "$1" in
+        --install)
+            show_banner
+            install_systemwide
+            ;;
+        --uninstall)
+            show_banner
+            uninstall_systemwide
+            ;;
+        --help|-h)
+            show_usage
+            ;;
+        *)
+            # Run locally with all arguments
+            show_banner
+            run_local "$@"
+            ;;
+    esac
+}
+
+main "$@"
