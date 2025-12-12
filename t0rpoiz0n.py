@@ -2,7 +2,7 @@
 """
 t0rpoiz0n - Advanced Tor Transparent Proxy + MAC Spoofing Tool
 Author: 0xb0rn3 | oxbv1
-Version: 1.0.0
+Version: 1.1.0 - Fixed browser leak protection
 Built for Arch Linux
 """
 
@@ -68,7 +68,7 @@ def banner():
 ║                                                            ║
 ║  Advanced Tor Transparent Proxy + MAC Spoofing Framework  ║
 ║                  Author: 0xb0rn3 | oxbv1                   ║
-║                      Version: 1.0.0                        ║
+║                      Version: 1.1.0                        ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
 {Color.RESET}""")
@@ -212,7 +212,7 @@ def grant_port_capabilities():
     print(f"{Color.GREEN}[✓] Granted port binding capabilities to Tor{Color.RESET}")
 
 def create_iptables_rules():
-    """Create iptables rules for transparent proxy"""
+    """Create iptables rules for transparent proxy with leak protection"""
     rules = """*nat
 :PREROUTING ACCEPT [0:0]
 :INPUT ACCEPT [0:0]
@@ -228,18 +228,27 @@ def create_iptables_rules():
 # Allow localhost
 -A OUTPUT -o lo -j RETURN
 
-# Allow LAN
+# Allow LAN (optional - comment out for maximum security)
 -A OUTPUT -d 192.168.0.0/16 -j RETURN
 -A OUTPUT -d 10.0.0.0/8 -j RETURN
 -A OUTPUT -d 172.16.0.0/12 -j RETURN
 
-# Allow Tor user
+# Allow Tor user (root) - MUST be before other rules
 -A OUTPUT -m owner --uid-owner root -j RETURN
 
-# Redirect DNS
+# Redirect ALL DNS queries to Tor (blocks DoH bypass)
 -A OUTPUT -p udp -m udp --dport 53 -j REDIRECT --to-ports 53
+-A OUTPUT -p tcp -m tcp --dport 53 -j REDIRECT --to-ports 53
 
-# Redirect TCP
+# Block DNS over HTTPS (DoH) common ports
+-A OUTPUT -p tcp -m tcp --dport 853 -j REJECT
+-A OUTPUT -p udp -m udp --dport 853 -j REJECT
+
+# Block QUIC/HTTP3 (UDP 443) - browsers use this to bypass Tor
+-A OUTPUT -p udp -m udp --dport 443 -j REJECT
+-A OUTPUT -p udp -m udp --dport 80 -j REJECT
+
+# Redirect all TCP to Tor TransPort
 -A OUTPUT -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REDIRECT --to-ports 9040
 
 COMMIT
@@ -247,19 +256,33 @@ COMMIT
 *filter
 :INPUT ACCEPT [0:0]
 :FORWARD DROP [0:0]
-:OUTPUT ACCEPT [0:0]
+:OUTPUT DROP [0:0]
 
 # Allow localhost
 -A INPUT -i lo -j ACCEPT
 -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
-# Allow LAN
+# Allow LAN (optional)
 -A INPUT -s 192.168.0.0/16 -j ACCEPT
 -A INPUT -s 10.0.0.0/8 -j ACCEPT
+-A INPUT -s 172.16.0.0/12 -j ACCEPT
 
-# Allow Tor
--A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+# OUTPUT rules - DEFAULT DROP for security
 -A OUTPUT -o lo -j ACCEPT
+-A OUTPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+# Allow Tor process (running as root)
+-A OUTPUT -m owner --uid-owner root -j ACCEPT
+
+# Block all other UDP (prevents leaks)
+-A OUTPUT -p udp -j REJECT --reject-with icmp-port-unreachable
+
+# Allow only Tor-redirected TCP
+-A OUTPUT -p tcp -m tcp --dport 9040 -j ACCEPT
+-A OUTPUT -p tcp -m tcp --dport 9050 -j ACCEPT
+
+# Reject everything else
+-A OUTPUT -j REJECT --reject-with icmp-port-unreachable
 
 COMMIT
 """
@@ -379,6 +402,24 @@ def start_transparent_proxy():
         print(f"{Color.YELLOW}[!] Tor may still be bootstrapping...{Color.RESET}")
     
     print(f"{Color.GREEN}[✓] Transparent proxy activated{Color.RESET}")
+    
+    # Show browser warning
+    print(f"\n{Color.YELLOW}{'='*60}{Color.RESET}")
+    print(f"{Color.YELLOW}{Color.BOLD}[!] IMPORTANT: Browser Configuration Required{Color.RESET}")
+    print(f"{Color.YELLOW}{'='*60}{Color.RESET}")
+    print(f"{Color.CYAN}Modern browsers may leak your IP through:{Color.RESET}")
+    print(f"  • DNS-over-HTTPS (DoH)")
+    print(f"  • QUIC/HTTP3 protocol")
+    print(f"  • WebRTC")
+    print(f"\n{Color.GREEN}RECOMMENDED: Use Tor Browser{Color.RESET}")
+    print(f"  Download: https://www.torproject.org/download/\n")
+    print(f"{Color.YELLOW}OR configure Firefox manually:{Color.RESET}")
+    print(f"  1. Go to: {Color.CYAN}about:config{Color.RESET}")
+    print(f"  2. Set {Color.CYAN}network.trr.mode = 5{Color.RESET} (disable DoH)")
+    print(f"  3. Set {Color.CYAN}network.http.http3.enabled = false{Color.RESET} (disable QUIC)")
+    print(f"  4. Set {Color.CYAN}media.peerconnection.enabled = false{Color.RESET} (disable WebRTC)")
+    print(f"{Color.YELLOW}{'='*60}{Color.RESET}\n")
+    
     return True
 
 def stop_transparent_proxy():
@@ -456,9 +497,40 @@ def check_status():
     else:
         print(f"{Color.RED}[✗] Connection test failed{Color.RESET}")
     
+    # Test transparent proxy (as current user, not root)
+    print(f"\n{Color.CYAN}[*] Testing transparent proxy...{Color.RESET}")
+    print(f"{Color.YELLOW}[!] Note: Test this as regular user (not root){Color.RESET}")
+    
+    # Check iptables rules
+    print(f"\n{Color.CYAN}[*] Checking iptables rules...{Color.RESET}")
+    result = run_cmd("iptables -t nat -L -n -v | grep -c '9040'", check=False)
+    if int(result.stdout.strip() or 0) > 0:
+        print(f"{Color.GREEN}[✓] iptables rules active{Color.RESET}")
+    else:
+        print(f"{Color.RED}[✗] iptables rules not found{Color.RESET}")
+    
+    # Show packet counts
+    result = run_cmd("iptables -t nat -L -n -v | grep 9040 | head -1", check=False)
+    if result.stdout.strip():
+        print(f"{Color.CYAN}[*] Packets redirected: {result.stdout.strip().split()[0]}{Color.RESET}")
+    
     # Show bootstrap status
-    print(f"\n{Color.CYAN}[*] Tor bootstrap status:{Color.RESET}")
-    run_cmd("journalctl -u tor-t0rpoiz0n.service --no-pager | grep 'Bootstrapped' | tail -5")
+    print(f"\n{Color.CYAN}[*] Recent Tor logs:{Color.RESET}")
+    run_cmd("journalctl -u tor-t0rpoiz0n.service --no-pager | grep 'Bootstrapped' | tail -3", check=False)
+    
+    # Leak test warning
+    print(f"\n{Color.YELLOW}{'='*60}{Color.RESET}")
+    print(f"{Color.YELLOW}{Color.BOLD}[!] Leak Testing Recommendations{Color.RESET}")
+    print(f"{Color.YELLOW}{'='*60}{Color.RESET}")
+    print(f"{Color.CYAN}Test for leaks (as regular user, NOT root):{Color.RESET}")
+    print(f"  • https://check.torproject.org")
+    print(f"  • https://whoer.net")
+    print(f"  • https://ipleak.net")
+    print(f"  • https://browserleaks.com")
+    print(f"\n{Color.YELLOW}Command line test:{Color.RESET}")
+    print(f"  {Color.GREEN}curl https://check.torproject.org/api/ip{Color.RESET}")
+    print(f"  (Run as regular user, NOT with sudo)")
+    print(f"{Color.YELLOW}{'='*60}{Color.RESET}\n")
 
 def change_identity():
     """Get new Tor circuit / IP"""
@@ -506,7 +578,7 @@ def setup_environment():
     create_iptables_rules()
     
     # Mark setup as complete
-    CONFIG_FILE.write_text(json.dumps({'setup_complete': True, 'version': '1.0.0'}))
+    CONFIG_FILE.write_text(json.dumps({'setup_complete': True, 'version': '1.1.0'}))
     
     print(f"\n{Color.GREEN}{'='*60}{Color.RESET}")
     print(f"{Color.GREEN}{Color.BOLD}[✓] Setup Complete!{Color.RESET}")
