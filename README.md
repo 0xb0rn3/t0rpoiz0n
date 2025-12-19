@@ -3,7 +3,8 @@
 **Advanced Tor Transparent Proxy + MAC Spoofing Framework for Arch Linux**
 
 Author: **0xb0rn3 | oxbv1**  
-Version: **1.1.1**
+Version: **1.1.3**  
+Release Date: **December 19, 2025**
 
 ---
 
@@ -14,12 +15,35 @@ Version: **1.1.1**
 - ✅ **Automated Setup** - One-command installation and configuration
 - ✅ **Zero Configuration** - Works out of the box
 - ✅ **Production Ready** - Comprehensive error handling
-- ✅ **Fixed All Issues** - No more `Type=symple` or permission errors
+- ✅ **nftables Compatible** - Native support for modern iptables-nft backend
+- ✅ **Smart Rule Generation** - Automatically creates compatible rules for your system
 - ✅ **IPv6 Disabled** - Prevents leaks
 - ✅ **DNS through Tor** - All DNS queries via Tor DNSPort
 - ✅ **Easy Identity Changes** - New Tor circuit with one command
-- ✅ **Auto-loads iptables modules** - Works on nftables systems
+- ✅ **Dual Backend Support** - Works with both iptables-nft and iptables-legacy
 - ✅ **Auto-Update Check** - Checks GitHub for updates every 24 hours
+
+---
+
+## 🆕 What's New in v1.1.3
+
+### 🔧 CRITICAL FIX - nftables Compatibility
+
+**FINALLY FIXED**: The "RULE_APPEND failed (Invalid argument)" error on modern Arch Linux!
+
+#### The Problem (v1.1.2 and earlier)
+```
+[✗] Command failed: iptables-nft-restore
+Error: line 15: RULE_APPEND failed (Invalid argument)
+```
+
+#### The Solution (v1.1.3)
+- ✅ **Smart Rule Generation**: Creates nftables-compatible OR legacy rules based on detected backend
+- ✅ **Native nft Support**: Uses direct `nft` commands for IPv6 blocking on modern systems
+- ✅ **Automatic Backend Detection**: Detects iptables-nft vs iptables-legacy and adapts
+- ✅ **Dual Rule System**: Separate optimized rules for each backend type
+
+**Result**: Tool now works perfectly on modern Arch Linux with nftables! 🎉
 
 ---
 
@@ -58,47 +82,38 @@ sudo ./run -s
 
 The installer will:
 1. Install dependencies (tor, iptables, macchanger)
-2. Create system directories
-3. Setup Tor service with fixed configuration
-4. Grant necessary capabilities
-5. Make `t0rpoiz0n` available system-wide
-6. Auto-load iptables kernel modules
+2. Detect your iptables backend (nft or legacy)
+3. Create backend-appropriate rules
+4. Setup Tor service with optimized configuration
+5. Grant necessary capabilities
+6. Make `t0rpoiz0n` available system-wide
 
 ---
 
-## 🔄 Auto-Update Feature
+## 🔄 Upgrading from v1.1.2 or Earlier
 
-t0rpoiz0n includes an automatic update checker that ensures you're always running the latest version.
-
-### How It Works
-
-- **Automatic Check**: Every 24 hours, the tool checks GitHub for new versions
-- **User Prompt**: If an update is available, you'll be prompted to install it
-- **One-Click Update**: Simply press 'y' to auto-update from GitHub
-- **Silent When Current**: No interruption if you're already on the latest version
-
-### Update Commands
+**IMPORTANT**: If you're experiencing "RULE_APPEND failed" errors, upgrade immediately!
 
 ```bash
-# Let the tool auto-update (prompted every 24 hours)
-sudo t0rpoiz0n -s
-
-# Skip update check for this run
-sudo t0rpoiz0n --no-update-check -s
-
-# Force check for updates (run manually)
+# Go to your repository
 cd ~/t0rpoiz0n
-git pull
-sudo ./run --install
+
+# Download new v1.1.3 file
+# Copy the new t0rpoiz0n.py to your directory
+
+# Replace old version
+cp ~/Downloads/t0rpoiz0n.py ./t0rpoiz0n.py
+
+# Update system installation
+sudo cp ./t0rpoiz0n.py /usr/local/bin/t0rpoiz0n
+sudo chmod +x /usr/local/bin/t0rpoiz0n
+
+# Regenerate rules for YOUR backend
+sudo t0rpoiz0n --setup
+
+# Test it
+sudo t0rpoiz0n -s -m -v motorola
 ```
-
-### Update Process
-
-When an update is available:
-1. Tool detects new version on GitHub
-2. Prompts you: "Would you like to update now? [y/N]"
-3. If yes: Automatically pulls latest code and reinstalls
-4. If no: Continues with current version
 
 ---
 
@@ -199,49 +214,37 @@ Shows:
 - Current exit IP
 - Bootstrap status
 - iptables statistics
+- Detected backend (nft or legacy)
 
 ---
 
 ## 🛠️ Technical Details
 
-### What Gets Fixed
+### What's Fixed in v1.1.3
 
-This tool fixes all the issues from the original archtorify:
+This version completely resolves the nftables compatibility issues:
 
-1. **✅ Type=symple → Type=simple** - Fixed systemd service typo
-2. **✅ User tor conflict** - Removed from torrc, handled by systemd
-3. **✅ DNSPort 53 permission** - Uses `setcap` for port binding
-4. **✅ Hardening conflicts** - Simplified service file
-5. **✅ Directory permissions** - Proper ownership for root execution
-6. **✅ IPv6 leaks** - Disabled during proxy mode
-7. **✅ DNS leaks** - All DNS through Tor
-8. **✅ iptables modules** - Auto-loads on nftables systems
-
-### What's New in v1.1.1
-
-- **Auto-loads iptables kernel modules** - No more "Table does not exist" errors
-- **Works on nftables systems** - Automatically loads legacy iptables modules
-- **Persistent module configuration** - Modules load automatically on boot
-- **Better error messages** - Clear guidance when issues occur
-- **Graceful fallback** - Continues even if some modules fail to load
+1. **✅ Smart Rule Generation** - Creates different rules for different backends
+2. **✅ nftables-Compatible Rules** - Removes incompatible options for nft backend
+3. **✅ Native nft Commands** - Uses direct `nft` for IPv6 blocking
+4. **✅ Owner Matching Handled** - Removed from nft rules, kept in legacy rules
+5. **✅ IPv6-ICMP Fixed** - Uses native nft commands instead of iptables syntax
+6. **✅ Automatic Backend Detection** - Detects and adapts to your system
 
 ### Architecture
 
 ```
 User Command
     ↓
-Auto-Update Checker (NEW!)
-    ├→ Checks GitHub every 24h
-    ├→ Prompts for update if available
-    └→ Auto-pulls and reinstalls
+Backend Detection
+    ├→ iptables-nft (modern) → nftables-compatible rules
+    └→ iptables-legacy (traditional) → full-featured rules
     ↓
 t0rpoiz0n (Python)
     ↓
-├→ Module Loader
-│   ├→ iptable_filter
-│   ├→ iptable_nat
-│   ├→ iptable_mangle
-│   └→ ip_tables
+├→ Smart Rule Generator
+│   ├→ create_iptables_rules_nft() for nftables
+│   └→ create_iptables_rules_legacy() for legacy
 │
 ├→ Tor Service (systemd)
 │   ├→ TransPort: 9040 (Transparent Proxy)
@@ -253,8 +256,31 @@ t0rpoiz0n (Python)
 │   ├→ Redirect DNS → 53
 │   └→ Block IPv6
 │
+├→ Native nft (for nftables backend)
+│   └→ Block IPv6-ICMP
+│
 └→ macchanger (Optional)
     └→ Spoof MAC Address
+```
+
+### Rule Differences by Backend
+
+#### nftables Backend (Modern Arch)
+```bash
+# What's REMOVED (incompatible with nft):
+-m owner --uid-owner tor    # Owner matching
+-p ipv6-icmp                # IPv6-ICMP protocol
+
+# What's ADDED (native nft):
+nft add rule inet filter output meta l4proto ipv6-icmp drop
+nft add rule inet filter output ip6 version 6 drop
+```
+
+#### Legacy Backend (Traditional)
+```bash
+# What's INCLUDED (full features):
+-m owner --uid-owner tor    # Owner matching works
+-p ipv6-icmp                # Protocol blocking works
 ```
 
 ### Files Created
@@ -263,11 +289,11 @@ t0rpoiz0n (Python)
 - `/etc/systemd/system/tor-t0rpoiz0n.service` - Custom Tor service
 - `/etc/tor/torrc` - Tor configuration
 - `/usr/share/t0rpoiz0n/` - Data directory
+- `/usr/share/t0rpoiz0n/iptables.rules` - Backend-specific rules
 - `/var/lib/t0rpoiz0n/backups/` - Original file backups
 - `/etc/t0rpoiz0n/config.json` - Tool configuration
-- `/etc/modules-load.d/iptables.conf` - Persistent module config
-- `/etc/t0rpoiz0n/.last_update_check` - Update check timestamp (NEW!)
-- `/etc/t0rpoiz0n/.repo_path` - Repository path for updates (NEW!)
+- `/etc/t0rpoiz0n/.last_update_check` - Update check timestamp
+- `/etc/t0rpoiz0n/.repo_path` - Repository path for updates
 
 ### Network Flow
 
@@ -276,7 +302,7 @@ Application
     ↓
 Kernel Network Stack
     ↓
-iptables REDIRECT
+iptables REDIRECT (nft or legacy)
     ↓
 Tor TransPort (9040) / DNSPort (53)
     ↓
@@ -316,29 +342,30 @@ Destination
 
 ---
 
-## 🐛 Troubleshooting
+## 🛠 Troubleshooting
 
-### iptables "Table does not exist" Error (FIXED in v1.1.1)
+### "RULE_APPEND failed" Error (FIXED in v1.1.3)
 
-This error is now automatically fixed! The tool will:
-- Detect missing iptables modules
-- Load them automatically
-- Create persistent configuration for boot
+If you're still seeing this error, you need to upgrade to v1.1.3:
 
-If you still see issues:
 ```bash
-# Manually load modules
-sudo modprobe iptable_filter
-sudo modprobe iptable_nat
-sudo modprobe iptable_mangle
-
-# Check if nftables is interfering
-sudo systemctl status nftables
-sudo systemctl stop nftables
-sudo systemctl disable nftables
-
-# Re-run setup
+# Quick upgrade
+cd ~/t0rpoiz0n
+cp ~/Downloads/t0rpoiz0n.py ./t0rpoiz0n.py
+sudo cp ./t0rpoiz0n.py /usr/local/bin/t0rpoiz0n
+sudo chmod +x /usr/local/bin/t0rpoiz0n
 sudo t0rpoiz0n --setup
+```
+
+### Check Which Backend You're Using
+
+```bash
+# Check detection
+sudo t0rpoiz0n --setup | grep backend
+
+# Should show one of:
+# [✓] Using iptables-nft (nftables backend)
+# [✓] Using iptables-legacy (legacy backend)
 ```
 
 ### Tor Service Won't Start
@@ -389,6 +416,18 @@ cat /etc/resolv.conf
 sudo netstat -tulpn | grep :53
 ```
 
+### Rules Not Applying
+
+```bash
+# Check your backend
+iptables-nft -L -n 2>&1 | head -5
+iptables-legacy -L -n 2>&1 | head -5
+
+# Force regeneration
+sudo rm -rf /usr/share/t0rpoiz0n
+sudo t0rpoiz0n --setup
+```
+
 ---
 
 ## 📄 Comparison with Original Tools
@@ -404,8 +443,9 @@ sudo netstat -tulpn | grep :53
 | MAC Spoofing | ❌ | ✅ |
 | Error Handling | Basic | Comprehensive |
 | Status Checking | Limited | Detailed |
-| iptables Modules | Manual | Auto-loaded |
 | nftables Support | ❌ | ✅ |
+| Smart Rules | ❌ | ✅ |
+| Dual Backend | ❌ | ✅ |
 
 ### vs ToriFY
 
@@ -417,7 +457,8 @@ sudo netstat -tulpn | grep :53
 | DNS Leak Protection | ❌ | ✅ |
 | IPv6 Leak Protection | ❌ | ✅ |
 | Arch Linux | ❌ | ✅ |
-| iptables Auto-load | ❌ | ✅ |
+| nftables Support | ❌ | ✅ |
+| Auto Backend Detection | ❌ | ✅ |
 
 ---
 
@@ -440,6 +481,7 @@ Contributions welcome! Areas for improvement:
 - Additional MAC vendor databases
 - Bridge support for censored regions
 - Pluggable transports integration
+- IPv6 transparent proxy support
 
 ---
 
@@ -447,7 +489,8 @@ Contributions welcome! Areas for improvement:
 
 **Author:** 0xb0rn3 | oxbv1  
 **GitHub:** https://github.com/0xb0rn3/t0rpoiz0n  
-**Version:** 1.1.1
+**Version:** 1.1.3  
+**Release Date:** December 19, 2025
 
 ---
 
@@ -460,13 +503,19 @@ cd t0rpoiz0n
 sudo ./run --uninstall
 ```
 
+Or use the cleanup script:
+
+```bash
+sudo bash cleanup.sh
+```
+
 This will:
 - Stop and disable Tor service
 - Remove all installed files
 - Clean up system directories
 - Restore iptables rules
 - Remove systemwide command
-- Remove module configuration
+- Remove all configurations
 
 ---
 
@@ -475,6 +524,7 @@ This will:
 - **Tor Project** - The Tor network and software
 - **brainfucksec** - Original archtorify concept
 - **Debajyoti0-0** - MAC spoofing inspiration from ToriFY
+- **Arch Linux Community** - nftables compatibility feedback
 
 ---
 
@@ -494,4 +544,20 @@ The author and contributors are not responsible for misuse or damage caused by t
 
 ---
 
+## 🔖 Version History
+
+| Version | Date | Status | Key Feature |
+|---------|------|--------|-------------|
+| **1.1.3** | **Dec 19, 2025** | **✅ STABLE** | **nftables compatibility** |
+| 1.1.2 | Dec 19, 2025 | ⚠️ Broken on nftables | Backend detection |
+| 1.1.1 | Dec 19, 2025 | ⚠️ Broken on nftables | Auto-updates |
+| 1.1.0 | Dec 12, 2025 | ⚠️ Broken on nftables | DoH/QUIC fixes |
+| 1.0.0 | Dec 12, 2025 | ⚠️ Broken on nftables | Initial release |
+
+**Recommended Version:** v1.1.3 (Current)
+
+---
+
 *Built with 💀 for the security research community*
+
+**Stay Anonymous. Stay Safe. Stay Updated.** 🛡️
