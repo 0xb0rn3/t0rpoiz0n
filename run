@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# t0rpoiz0n - Universal Installer and Runner
+# t0rpoiz0n - Universal Installer and Runner with Auto-Update
 # Author: 0xb0rn3 | oxbv1
-# Version: 1.0.0
+# Version: 1.1.1
 # Repository: github.com/0xb0rn3/t0rpoiz0n
 #
 
@@ -18,6 +18,12 @@ RESET='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL_SCRIPT="${SCRIPT_DIR}/t0rpoiz0n.py"
 INSTALL_PATH="/usr/local/bin/t0rpoiz0n"
+CONFIG_DIR="/etc/t0rpoiz0n"
+UPDATE_CHECK_FILE="${CONFIG_DIR}/.last_update_check"
+REPO_PATH_FILE="${CONFIG_DIR}/.repo_path"
+CURRENT_VERSION="1.1.1"
+GITHUB_REPO="0xb0rn3/t0rpoiz0n"
+UPDATE_CHECK_INTERVAL=86400  # 24 hours in seconds
 
 show_banner() {
     echo -e "${CYAN}${BOLD}"
@@ -36,7 +42,7 @@ show_banner() {
 
             TOR PROXY & MAC SPOOFING FRAMEWORK
                  Engineered by: oxbv1
-                    Version: 1.1.0
+                    Version: 1.1.1
           Repository: github.com/0xb0rn3/t0rpoiz0n
 EOF
     echo -e "${RESET}"
@@ -59,6 +65,266 @@ check_python() {
     fi
 }
 
+get_repo_path() {
+    # Try to find the repository path
+    local repo_path=""
+    
+    # Check if repo path is stored
+    if [[ -f "${REPO_PATH_FILE}" ]]; then
+        repo_path=$(cat "${REPO_PATH_FILE}")
+        if [[ -d "${repo_path}/.git" ]]; then
+            echo "${repo_path}"
+            return 0
+        fi
+    fi
+    
+    # Check current directory
+    if [[ -d "${SCRIPT_DIR}/.git" ]]; then
+        echo "${SCRIPT_DIR}"
+        return 0
+    fi
+    
+    # Check common locations
+    for path in "/opt/t0rpoiz0n" "${HOME}/t0rpoiz0n" "/usr/local/src/t0rpoiz0n"; do
+        if [[ -d "${path}/.git" ]]; then
+            echo "${path}"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
+save_repo_path() {
+    local repo_path="$1"
+    mkdir -p "${CONFIG_DIR}"
+    echo "${repo_path}" > "${REPO_PATH_FILE}"
+}
+
+should_check_update() {
+    # Check if update check should be performed
+    if [[ ! -f "${UPDATE_CHECK_FILE}" ]]; then
+        return 0  # No previous check, should check
+    fi
+    
+    local last_check=$(cat "${UPDATE_CHECK_FILE}")
+    local current_time=$(date +%s)
+    local time_diff=$((current_time - last_check))
+    
+    if [[ $time_diff -ge $UPDATE_CHECK_INTERVAL ]]; then
+        return 0  # More than 24 hours, should check
+    fi
+    
+    return 1  # Checked recently, skip
+}
+
+update_check_timestamp() {
+    mkdir -p "${CONFIG_DIR}"
+    date +%s > "${UPDATE_CHECK_FILE}"
+}
+
+get_latest_version() {
+    # Fetch latest version from GitHub releases
+    local latest_version=$(curl -s "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" \
+        | grep '"tag_name":' \
+        | sed -E 's/.*"([^"]+)".*/\1/' \
+        | tr -d 'v')
+    
+    if [[ -z "$latest_version" ]]; then
+        # Fallback: try to get from tags
+        latest_version=$(curl -s "https://api.github.com/repos/${GITHUB_REPO}/tags" \
+            | grep '"name":' \
+            | head -1 \
+            | sed -E 's/.*"([^"]+)".*/\1/' \
+            | tr -d 'v')
+    fi
+    
+    echo "$latest_version"
+}
+
+version_compare() {
+    # Compare two version strings
+    # Returns: 0 if equal, 1 if first is greater, 2 if second is greater
+    if [[ "$1" == "$2" ]]; then
+        return 0
+    fi
+    
+    local IFS=.
+    local i ver1=($1) ver2=($2)
+    
+    # Fill empty positions with zeros
+    for ((i=${#ver1[@]}; i<${#ver2[@]}; i++)); do
+        ver1[i]=0
+    done
+    
+    for ((i=0; i<${#ver1[@]}; i++)); do
+        if [[ -z ${ver2[i]} ]]; then
+            ver2[i]=0
+        fi
+        if ((10#${ver1[i]} > 10#${ver2[i]})); then
+            return 1
+        fi
+        if ((10#${ver1[i]} < 10#${ver2[i]})); then
+            return 2
+        fi
+    done
+    
+    return 0
+}
+
+perform_update() {
+    local repo_path="$1"
+    
+    echo -e "\n${CYAN}${BOLD}[*] UPDATING t0rpoiz0n${RESET}\n"
+    
+    # Change to repo directory
+    cd "${repo_path}"
+    
+    # Fetch latest changes
+    echo -e "${CYAN}[*] Fetching latest changes from GitHub...${RESET}"
+    if ! git fetch origin; then
+        echo -e "${RED}[✗] Failed to fetch from GitHub${RESET}"
+        return 1
+    fi
+    
+    # Pull latest changes
+    echo -e "${CYAN}[*] Pulling latest version...${RESET}"
+    if ! git pull origin main 2>/dev/null && ! git pull origin master 2>/dev/null; then
+        echo -e "${RED}[✗] Failed to pull latest version${RESET}"
+        return 1
+    fi
+    
+    echo -e "${GREEN}[✓] Repository updated${RESET}"
+    
+    # Reinstall if systemwide
+    if [[ -f "${INSTALL_PATH}" ]]; then
+        echo -e "\n${CYAN}[*] Reinstalling systemwide...${RESET}"
+        cp "${repo_path}/t0rpoiz0n.py" "${INSTALL_PATH}"
+        chmod +x "${INSTALL_PATH}"
+        
+        # Re-run setup to update configs
+        "${INSTALL_PATH}" --setup 2>/dev/null || true
+        
+        echo -e "${GREEN}[✓] Systemwide installation updated${RESET}"
+    fi
+    
+    echo -e "\n${GREEN}${BOLD}╔════════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${GREEN}${BOLD}║                  UPDATE COMPLETED!                         ║${RESET}"
+    echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════════════════════╝${RESET}\n"
+    
+    return 0
+}
+
+check_for_updates() {
+    # Skip if --no-update-check flag is present
+    for arg in "$@"; do
+        if [[ "$arg" == "--no-update-check" ]]; then
+            return 0
+        fi
+    done
+    
+    # Skip if checked recently
+    if ! should_check_update; then
+        return 0
+    fi
+    
+    # Try to find repository path
+    local repo_path=$(get_repo_path)
+    if [[ $? -ne 0 ]]; then
+        # Not in a git repo, skip update check
+        return 0
+    fi
+    
+    # Save repo path for future use
+    save_repo_path "${repo_path}"
+    
+    # Check for internet connectivity
+    if ! ping -c 1 github.com &>/dev/null; then
+        # No internet, skip silently
+        return 0
+    fi
+    
+    echo -e "${CYAN}[*] Checking for updates...${RESET}"
+    
+    # Get latest version from GitHub
+    local latest_version=$(get_latest_version)
+    
+    if [[ -z "$latest_version" ]]; then
+        echo -e "${YELLOW}[!] Could not check for updates${RESET}"
+        update_check_timestamp
+        return 0
+    fi
+    
+    # Compare versions
+    version_compare "$CURRENT_VERSION" "$latest_version"
+    local result=$?
+    
+    if [[ $result -eq 2 ]]; then
+        # New version available
+        echo -e "\n${YELLOW}${BOLD}╔════════════════════════════════════════════════════════════╗${RESET}"
+        echo -e "${YELLOW}${BOLD}║              NEW VERSION AVAILABLE!                        ║${RESET}"
+        echo -e "${YELLOW}${BOLD}╚════════════════════════════════════════════════════════════╝${RESET}\n"
+        echo -e "${CYAN}Current version:${RESET} ${CURRENT_VERSION}"
+        echo -e "${GREEN}Latest version:${RESET}  ${latest_version}\n"
+        
+        # Ask user if they want to update
+        echo -e -n "${YELLOW}Would you like to update now? [y/N]: ${RESET}"
+        read -r response
+        
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            if perform_update "${repo_path}"; then
+                echo -e "\n${GREEN}[✓] Update complete! Please run the command again.${RESET}\n"
+                exit 0
+            else
+                echo -e "\n${RED}[✗] Update failed. Continuing with current version...${RESET}\n"
+            fi
+        else
+            echo -e "${CYAN}[*] Skipping update. Run 'git pull' in ${repo_path} to update manually.${RESET}\n"
+        fi
+    elif [[ $result -eq 0 ]]; then
+        echo -e "${GREEN}[✓] You're running the latest version (${CURRENT_VERSION})${RESET}"
+    fi
+    
+    # Update timestamp
+    update_check_timestamp
+}
+
+create_wrapper_script() {
+    # Create a wrapper script that checks for updates before executing
+    local wrapper_script="/usr/local/bin/t0rpoiz0n-wrapper"
+    local actual_tool="/usr/local/bin/t0rpoiz0n-actual"
+    
+    # Move actual tool to -actual
+    if [[ -f "${INSTALL_PATH}" ]]; then
+        mv "${INSTALL_PATH}" "${actual_tool}"
+    else
+        cp "${TOOL_SCRIPT}" "${actual_tool}"
+        chmod +x "${actual_tool}"
+    fi
+    
+    # Create wrapper script
+    cat > "${wrapper_script}" << 'WRAPPER_EOF'
+#!/usr/bin/env bash
+# t0rpoiz0n wrapper with auto-update check
+
+ACTUAL_TOOL="/usr/local/bin/t0rpoiz0n-actual"
+RUN_SCRIPT="$(cat /etc/t0rpoiz0n/.repo_path 2>/dev/null)/run"
+
+# If run script exists, use it to check updates
+if [[ -f "${RUN_SCRIPT}" ]]; then
+    bash "${RUN_SCRIPT}" --update-check-only "$@"
+fi
+
+# Execute actual tool
+exec python3 "${ACTUAL_TOOL}" "$@"
+WRAPPER_EOF
+    
+    chmod +x "${wrapper_script}"
+    
+    # Create symlink
+    ln -sf "${wrapper_script}" "${INSTALL_PATH}"
+}
+
 install_systemwide() {
     echo -e "\n${CYAN}${BOLD}[*] SYSTEMWIDE INSTALLATION${RESET}\n"
     
@@ -70,6 +336,10 @@ install_systemwide() {
     
     # Check Python
     check_python
+    
+    # Save repository path
+    save_repo_path "${SCRIPT_DIR}"
+    
     # Copy to system location
     echo -e "${CYAN}[*] Installing to ${INSTALL_PATH}${RESET}"
     cp "${TOOL_SCRIPT}" "${INSTALL_PATH}"
@@ -83,6 +353,10 @@ install_systemwide() {
     echo -e "\n${GREEN}${BOLD}╔════════════════════════════════════════════════════════════╗${RESET}"
     echo -e "${GREEN}${BOLD}║              SYSTEMWIDE INSTALLATION COMPLETE!             ║${RESET}"
     echo -e "${GREEN}${BOLD}╚════════════════════════════════════════════════════════════╝${RESET}\n"
+    
+    echo -e "${CYAN}${BOLD}[*] Auto-Update Enabled${RESET}"
+    echo -e "${CYAN}The tool will check for updates every 24 hours automatically.${RESET}"
+    echo -e "${CYAN}Use ${YELLOW}--no-update-check${RESET}${CYAN} flag to skip update check.${RESET}\n"
     
     show_usage_systemwide
 }
@@ -98,7 +372,10 @@ uninstall_systemwide() {
     # Remove files
     echo -e "${CYAN}[*] Removing files...${RESET}"
     rm -f "${INSTALL_PATH}"
+    rm -f /usr/local/bin/t0rpoiz0n-wrapper
+    rm -f /usr/local/bin/t0rpoiz0n-actual
     rm -f /etc/systemd/system/tor-t0rpoiz0n.service
+    rm -f /etc/modules-load.d/iptables.conf
     rm -rf /usr/share/t0rpoiz0n
     rm -rf /var/lib/t0rpoiz0n
     rm -rf /etc/t0rpoiz0n
@@ -141,13 +418,14 @@ run_local() {
 
 show_usage_systemwide() {
     echo -e "${CYAN}${BOLD}SYSTEMWIDE USAGE:${RESET}\n"
-    echo -e "  ${YELLOW}t0rpoiz0n -s${RESET}              # Start transparent proxy"
-    echo -e "  ${YELLOW}t0rpoiz0n -s -m${RESET}           # Start + change MAC"
-    echo -e "  ${YELLOW}t0rpoiz0n -s -m -v apple${RESET}  # Start + MAC as Apple"
-    echo -e "  ${YELLOW}t0rpoiz0n -c${RESET}              # Check status"
-    echo -e "  ${YELLOW}t0rpoiz0n -r${RESET}              # Change identity"
-    echo -e "  ${YELLOW}t0rpoiz0n -k${RESET}              # Stop and restore clearnet"
-    echo -e "  ${YELLOW}t0rpoiz0n -m -v samsung${RESET}   # Change MAC only\n"
+    echo -e "  ${YELLOW}t0rpoiz0n -s${RESET}                    # Start transparent proxy"
+    echo -e "  ${YELLOW}t0rpoiz0n -s -m${RESET}                 # Start + change MAC"
+    echo -e "  ${YELLOW}t0rpoiz0n -s -m -v apple${RESET}        # Start + MAC as Apple"
+    echo -e "  ${YELLOW}t0rpoiz0n -c${RESET}                    # Check status"
+    echo -e "  ${YELLOW}t0rpoiz0n -r${RESET}                    # Change identity"
+    echo -e "  ${YELLOW}t0rpoiz0n -k${RESET}                    # Stop and restore clearnet"
+    echo -e "  ${YELLOW}t0rpoiz0n -m -v samsung${RESET}         # Change MAC only"
+    echo -e "  ${YELLOW}t0rpoiz0n --no-update-check -s${RESET}  # Skip update check\n"
     
     echo -e "${CYAN}MAC Vendors:${RESET} samsung, apple, huawei, nokia, google, dell, hp, asus, lenovo, motorola\n"
 }
@@ -169,6 +447,10 @@ show_usage() {
     echo -e "  ${YELLOW}sudo ./run -k${RESET}              # Stop and restore clearnet"
     echo -e "  ${YELLOW}sudo ./run -m -v samsung${RESET}   # Change MAC only\n"
     
+    echo -e "${CYAN}${BOLD}UPDATE OPTIONS:${RESET}\n"
+    echo -e "  ${YELLOW}--no-update-check${RESET}          # Skip automatic update check"
+    echo -e "  ${CYAN}Note:${RESET} Updates are checked automatically every 24 hours\n"
+    
     echo -e "${CYAN}${BOLD}RECOMMENDED:${RESET}"
     echo -e "  1. Install systemwide: ${GREEN}sudo ./run --install${RESET}"
     echo -e "  2. Then use: ${GREEN}t0rpoiz0n -s${RESET} from anywhere\n"
@@ -184,8 +466,10 @@ main() {
         exit 0
     fi
     
-    # Check root for all operations
-    check_root
+    # Check root for all operations except help
+    if [[ "$1" != "--help" && "$1" != "-h" ]]; then
+        check_root
+    fi
     
     # Handle special commands
     case "$1" in
@@ -200,9 +484,18 @@ main() {
         --help|-h)
             show_usage
             ;;
+        --update-check-only)
+            # Internal flag used by wrapper
+            shift
+            check_for_updates "$@"
+            ;;
         *)
-            # Run locally with all arguments
             show_banner
+            
+            # Check for updates before running
+            check_for_updates "$@"
+            
+            # Run locally with all arguments
             run_local "$@"
             ;;
     esac
