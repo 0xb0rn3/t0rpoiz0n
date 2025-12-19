@@ -3,7 +3,7 @@
 **Advanced Tor Transparent Proxy + MAC Spoofing Framework for Arch Linux**
 
 Author: **0xb0rn3 | oxbv1**  
-Version: **1.1.0**
+Version: **1.1.1**
 
 ---
 
@@ -18,6 +18,7 @@ Version: **1.1.0**
 - ✅ **IPv6 Disabled** - Prevents leaks
 - ✅ **DNS through Tor** - All DNS queries via Tor DNSPort
 - ✅ **Easy Identity Changes** - New Tor circuit with one command
+- ✅ **Auto-loads iptables modules** - Works on nftables systems
 
 ---
 
@@ -60,6 +61,7 @@ The installer will:
 3. Setup Tor service with fixed configuration
 4. Grant necessary capabilities
 5. Make `t0rpoiz0n` available system-wide
+6. Auto-load iptables kernel modules
 
 ---
 
@@ -159,6 +161,7 @@ Shows:
 - Connection test
 - Current exit IP
 - Bootstrap status
+- iptables statistics
 
 ---
 
@@ -175,6 +178,15 @@ This tool fixes all the issues from the original archtorify:
 5. **✅ Directory permissions** - Proper ownership for root execution
 6. **✅ IPv6 leaks** - Disabled during proxy mode
 7. **✅ DNS leaks** - All DNS through Tor
+8. **✅ iptables modules** - Auto-loads on nftables systems
+
+### What's New in v1.1.1
+
+- **Auto-loads iptables kernel modules** - No more "Table does not exist" errors
+- **Works on nftables systems** - Automatically loads legacy iptables modules
+- **Persistent module configuration** - Modules load automatically on boot
+- **Better error messages** - Clear guidance when issues occur
+- **Graceful fallback** - Continues even if some modules fail to load
 
 ### Architecture
 
@@ -183,18 +195,24 @@ User Space
     ↓
 t0rpoiz0n (Python)
     ↓
-├─→ Tor Service (systemd)
-│   ├─→ TransPort: 9040 (Transparent Proxy)
-│   ├─→ SocksPort: 9050 (SOCKS5 Proxy)
-│   └─→ DNSPort: 53 (DNS)
+├→ Module Loader (NEW!)
+│   ├→ iptable_filter
+│   ├→ iptable_nat
+│   ├→ iptable_mangle
+│   └→ ip_tables
 │
-├─→ iptables (NAT + Filter)
-│   ├─→ Redirect TCP → 9040
-│   ├─→ Redirect DNS → 53
-│   └─→ Block IPv6
+├→ Tor Service (systemd)
+│   ├→ TransPort: 9040 (Transparent Proxy)
+│   ├→ SocksPort: 9050 (SOCKS5 Proxy)
+│   └→ DNSPort: 53 (DNS)
 │
-└─→ macchanger (Optional)
-    └─→ Spoof MAC Address
+├→ iptables (NAT + Filter)
+│   ├→ Redirect TCP → 9040
+│   ├→ Redirect DNS → 53
+│   └→ Block IPv6
+│
+└→ macchanger (Optional)
+    └→ Spoof MAC Address
 ```
 
 ### Files Created
@@ -205,6 +223,7 @@ t0rpoiz0n (Python)
 - `/usr/share/t0rpoiz0n/` - Data directory
 - `/var/lib/t0rpoiz0n/backups/` - Original file backups
 - `/etc/t0rpoiz0n/config.json` - Tool configuration
+- `/etc/modules-load.d/iptables.conf` - Persistent module config (NEW!)
 
 ### Network Flow
 
@@ -254,6 +273,29 @@ Destination
 ---
 
 ## 🐛 Troubleshooting
+
+### iptables "Table does not exist" Error (FIXED in v1.1.1)
+
+This error is now automatically fixed! The tool will:
+- Detect missing iptables modules
+- Load them automatically
+- Create persistent configuration for boot
+
+If you still see issues:
+```bash
+# Manually load modules
+sudo modprobe iptable_filter
+sudo modprobe iptable_nat
+sudo modprobe iptable_mangle
+
+# Check if nftables is interfering
+sudo systemctl status nftables
+sudo systemctl stop nftables
+sudo systemctl disable nftables
+
+# Re-run setup
+sudo t0rpoiz0n --setup
+```
 
 ### Tor Service Won't Start
 
@@ -305,7 +347,7 @@ sudo netstat -tulpn | grep :53
 
 ---
 
-## 🔄 Comparison with Original Tools
+## 📄 Comparison with Original Tools
 
 ### vs archtorify
 
@@ -318,6 +360,8 @@ sudo netstat -tulpn | grep :53
 | MAC Spoofing | ❌ | ✅ |
 | Error Handling | Basic | Comprehensive |
 | Status Checking | Limited | Detailed |
+| iptables Modules | Manual | Auto-loaded |
+| nftables Support | ❌ | ✅ |
 
 ### vs ToriFY
 
@@ -329,10 +373,11 @@ sudo netstat -tulpn | grep :53
 | DNS Leak Protection | ❌ | ✅ |
 | IPv6 Leak Protection | ❌ | ✅ |
 | Arch Linux | ❌ | ✅ |
+| iptables Auto-load | ❌ | ✅ |
 
 ---
 
-## 📝 License
+## 📜 License
 
 This tool is for **educational and research purposes only**.
 
@@ -358,7 +403,7 @@ Contributions welcome! Areas for improvement:
 
 **Author:** 0xb0rn3 | oxbv1  
 **GitHub:** https://github.com/0xb0rn3/t0rpoiz0n  
-**Version:** 1.1.0
+**Version:** 1.1.1
 
 ---
 
@@ -377,6 +422,7 @@ This will:
 - Clean up system directories
 - Restore iptables rules
 - Remove systemwide command
+- Remove module configuration
 
 ---
 
