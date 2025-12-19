@@ -194,6 +194,8 @@ def change_mac(interface: str, vendor: Optional[str] = None) -> bool:
 
 def create_iptables_rules_nft():
     """Create nftables-compatible iptables rules"""
+    print(f"{Color.CYAN}[*] Creating nftables-compatible rules...{Color.RESET}")
+    
     rules = """# t0rpoiz0n iptables rules (nftables backend compatible)
 # Generated for transparent Tor proxy
 
@@ -254,12 +256,19 @@ COMMIT
     
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     rules_file = DATA_DIR / "iptables.rules"
-    rules_file.write_text(rules)
+    
+    # Force write new rules
+    with open(rules_file, 'w') as f:
+        f.write(rules)
+    
+    print(f"{Color.GREEN}[✓] nftables-compatible rules written to {rules_file}{Color.RESET}")
     
     return rules_file
 
 def create_iptables_rules_legacy():
     """Create legacy iptables rules with owner matching"""
+    print(f"{Color.CYAN}[*] Creating legacy iptables rules...{Color.RESET}")
+    
     rules = """# t0rpoiz0n iptables rules (legacy backend)
 # Generated for transparent Tor proxy
 
@@ -331,17 +340,24 @@ COMMIT
     
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     rules_file = DATA_DIR / "iptables.rules"
-    rules_file.write_text(rules)
+    
+    # Force write new rules
+    with open(rules_file, 'w') as f:
+        f.write(rules)
+    
+    print(f"{Color.GREEN}[✓] Legacy iptables rules written to {rules_file}{Color.RESET}")
     
     return rules_file
 
 def create_iptables_rules():
     """Create appropriate iptables rules based on detected backend"""
+    global USING_NFT_BACKEND
+    
     if USING_NFT_BACKEND:
-        print(f"{Color.CYAN}[*] Creating nftables-compatible rules...{Color.RESET}")
+        print(f"{Color.YELLOW}[DEBUG] Backend is NFT, creating nft rules{Color.RESET}")
         return create_iptables_rules_nft()
     else:
-        print(f"{Color.CYAN}[*] Creating legacy iptables rules...{Color.RESET}")
+        print(f"{Color.YELLOW}[DEBUG] Backend is LEGACY, creating legacy rules{Color.RESET}")
         return create_iptables_rules_legacy()
 
 def create_torrc():
@@ -441,10 +457,12 @@ def first_time_setup():
     setup_directories()
     print(f"{Color.GREEN}[✓] Directories created{Color.RESET}")
     
-    # Detect backend first
+    # Detect backend BEFORE creating rules
+    print(f"{Color.CYAN}[*] Detecting iptables backend...{Color.RESET}")
     detect_iptables_backend()
     
-    # Create appropriate rules
+    # Create appropriate rules based on detected backend
+    print(f"{Color.CYAN}[*] Creating iptables rules...{Color.RESET}")
     create_iptables_rules()
     print(f"{Color.GREEN}[✓] iptables rules created{Color.RESET}")
     
@@ -481,7 +499,7 @@ def start_transparent_proxy():
     print(f"{Color.CYAN}{Color.BOLD}[*] Starting Transparent Proxy{Color.RESET}")
     print(f"{Color.CYAN}{'='*60}{Color.RESET}\n")
     
-    # Detect backend
+    # Detect backend FIRST before anything else
     detect_iptables_backend()
     
     # Stop existing Tor
@@ -526,8 +544,24 @@ def start_transparent_proxy():
     except:
         pass
     
-    # Regenerate rules for current backend
+    # Regenerate rules for current backend (THIS is the key fix!)
+    print(f"{Color.CYAN}[*] Regenerating rules for {IPTABLES_CMD}...{Color.RESET}")
     rules_path = create_iptables_rules()
+    
+    # Debug: Verify file was written correctly
+    if rules_path.exists():
+        with open(rules_path, 'r') as f:
+            first_line = f.readline().strip()
+            print(f"{Color.YELLOW}[DEBUG] Rules file first line: {first_line}{Color.RESET}")
+            if USING_NFT_BACKEND and "nftables backend compatible" not in first_line:
+                print(f"{Color.RED}[ERROR] Rules file has wrong content for nft backend!{Color.RESET}")
+            elif not USING_NFT_BACKEND and "legacy backend" not in first_line:
+                print(f"{Color.RED}[ERROR] Rules file has wrong content for legacy backend!{Color.RESET}")
+    else:
+        print(f"{Color.RED}[ERROR] Rules file was not created!{Color.RESET}")
+        return False
+    
+    print(f"{Color.GREEN}[✓] Rules generated and verified{Color.RESET}")
     
     # Apply rules
     try:
@@ -536,6 +570,8 @@ def start_transparent_proxy():
     except subprocess.CalledProcessError as e:
         print(f"{Color.RED}[✗] Failed to apply iptables rules{Color.RESET}")
         print(f"{Color.YELLOW}[!] Backend: {IPTABLES_CMD}{Color.RESET}")
+        print(f"{Color.YELLOW}[!] Dumping rules file for inspection:{Color.RESET}")
+        run_cmd(f"cat {rules_path} | head -20", check=False)
         return False
     
     # Additional IPv6 blocking for nft
