@@ -2,10 +2,77 @@
 
 All notable changes to t0rpoiz0n will be documented in this file.
 
+## [1.1.2] - 2025-12-19
+
+### 🔧 Critical Fixes
+- **CRITICAL**: Fixed "iptables: Table does not exist" error on modern Arch systems
+- **CRITICAL**: Automatic iptables backend detection (nft vs legacy)
+- **CRITICAL**: Auto-switches to working iptables backend
+- Fixed SyntaxWarning: invalid escape sequence in banner function
+- Fixed compatibility with nftables-only kernels
+
+### ✨ New Features
+- Automatic iptables backend detection system
+- Smart backend switching via update-alternatives
+- Dynamic command selection (iptables-nft vs iptables-legacy)
+- Backend status shown in all iptables operations
+- Graceful fallback between nft and legacy backends
+
+### 🛠️ Improvements
+- All iptables commands now use detected backend
+- Better error messages showing which backend is being used
+- Smarter module loading (detects nft backend before attempting legacy modules)
+- Enhanced status display shows detected backend
+- Works out-of-the-box on modern Arch with nftables-only kernels
+
+### 📝 Technical Changes
+- Added `detect_iptables_backend()` function
+- Added `switch_to_iptables_nft()` function for automatic switching
+- Global variables for dynamic command selection:
+  - `IPTABLES_CMD` - Dynamically set to working command
+  - `IPTABLES_RESTORE_CMD` - Dynamically set to working restore command
+  - `IPTABLES_SAVE_CMD` - Dynamically set to working save command
+- Modified `load_iptables_modules()` to try backend detection first
+- Updated `start_transparent_proxy()` to use detected backend
+- Updated `stop_transparent_proxy()` to use detected backend
+- Updated `check_tor_status()` to use detected backend
+- Fixed banner function with raw string literal
+
+### 🐛 Bug Fixes
+- Fixed: "can't initialize iptables table `filter': Table does not exist"
+- Fixed: "iptables-restore: unable to initialize table 'nat'"
+- Fixed: Module loading failures on nftables-only kernels
+- Fixed: SyntaxWarning about invalid escape sequence '\\ ' in docstring
+
+### ⚠️ Breaking Changes
+- None - fully backward compatible
+
+### 🔄 Migration from v1.1.1
+
+```bash
+# Quick update method
+cd ~/t0rpoiz0n
+cp ~/Downloads/t0rpoiz0n.py ./t0rpoiz0n.py
+sudo cp ./t0rpoiz0n.py /usr/local/bin/t0rpoiz0n
+sudo chmod +x /usr/local/bin/t0rpoiz0n
+sudo t0rpoiz0n -s
+
+# Or clean reinstall
+cd ~/Downloads
+chmod +x cleanup.sh
+sudo bash cleanup.sh
+cd ~/t0rpoiz0n
+cp ~/Downloads/t0rpoiz0n.py ./t0rpoiz0n.py
+chmod +x t0rpoiz0n.py
+sudo ./run --install
+```
+
+---
+
 ## [1.1.1] - 2025-12-19
 
 ### 🔧 Bug Fixes
-- **CRITICAL**: Fixed "iptables: Table does not exist" error on modern Arch systems
+- **CRITICAL**: Fixed iptables "Table does not exist" error on modern Arch systems
 - **CRITICAL**: Auto-loads iptables kernel modules (iptable_filter, iptable_nat, iptable_mangle)
 - Fixed compatibility with systems using nftables by default
 - Added graceful fallback when iptables modules fail to load
@@ -25,101 +92,12 @@ All notable changes to t0rpoiz0n will be documented in this file.
 - Better error handling for module loading
 - Clear status messages during module loading
 - Graceful degradation on module loading failures
-- Updated troubleshooting section in README
 - Auto-update system integrated into run script
 - Update checks run silently in background (no slowdown)
 - Stores last check timestamp to avoid redundant checks
-- Detects repository location automatically
-- `--no-update-check` flag to skip updates when needed
-
-### 📝 Documentation
-- Added iptables module troubleshooting section
-- Updated architecture diagram to show module loader and auto-updater
-- Added "What's New in v1.1.1" section
-- Enhanced comparison table with iptables auto-loading
-- Added comprehensive Auto-Update section
-- Documented update check behavior and timing
-- Added `--no-update-check` flag documentation
 
 ### ⚠️ Breaking Changes
 - None - fully backward compatible
-
-### 🔄 Migration Notes
-
-If you already have v1.1.0 installed and are experiencing iptables errors:
-
-```bash
-cd ~/t0rpoiz0n
-git pull
-sudo ./run --install  # Reinstall to update
-sudo t0rpoiz0n -k     # Stop old version
-sudo t0rpoiz0n -s     # Start with new auto-loading
-```
-
-If you're installing fresh, no special steps needed - it just works!
-
-### 🐛 Bug Context
-
-**The Problem:**
-Modern Arch Linux systems use nftables by default. When iptables commands run without the legacy iptables kernel modules loaded, they fail with:
-```
-iptables v1.8.11 (legacy): can't initialize iptables table `filter': Table does not exist
-```
-
-**The Solution:**
-v1.1.1 automatically detects and loads the required kernel modules:
-- `iptable_filter` - For filtering rules
-- `iptable_nat` - For NAT/redirection rules
-- `iptable_mangle` - For packet manipulation
-- `ip_tables` - Base iptables support
-
-The tool also creates `/etc/modules-load.d/iptables.conf` so these modules load automatically on every boot.
-
-### 🔄 Auto-Update System
-
-**How It Works:**
-The run script now includes an intelligent auto-update checker that:
-1. **Checks GitHub API** for the latest release/tag
-2. **Compares versions** using semantic versioning
-3. **Prompts user** if newer version available
-4. **Auto-updates** with one keypress (pulls from git and reinstalls)
-5. **Caches check time** to avoid checking every single run
-
-**Update Timing:**
-- Checks for updates once every 24 hours
-- Stores last check timestamp in `/etc/t0rpoiz0n/.last_update_check`
-- Silently skips if checked within last 24h (no slowdown)
-- Can be manually skipped with `--no-update-check` flag
-
-**Smart Detection:**
-- Automatically finds repository location (current dir, /opt, ~/t0rpoiz0n, etc.)
-- Saves repo path to `/etc/t0rpoiz0n/.repo_path` for future use
-- Works for both systemwide and local installations
-- Gracefully handles no internet connection
-
-**User Experience:**
-```bash
-$ sudo t0rpoiz0n -s
-[*] Checking for updates...
-
-╔════════════════════════════════════════════════════════════╗
-║              NEW VERSION AVAILABLE!                        ║
-╚════════════════════════════════════════════════════════════╝
-
-Current version: 1.1.0
-Latest version:  1.1.1
-
-Would you like to update now? [y/N]: y
-
-[*] Fetching latest changes from GitHub...
-[*] Pulling latest version...
-[✓] Repository updated
-[✓] Systemwide installation updated
-
-╔════════════════════════════════════════════════════════════╗
-║                  UPDATE COMPLETED!                         ║
-╚════════════════════════════════════════════════════════════╝
-```
 
 ---
 
@@ -142,26 +120,9 @@ Would you like to update now? [y/N]: y
 - Improved iptables rules with comprehensive leak protection
 - Better user guidance for browser configuration
 - Added clear warnings about root vs regular user testing
-- Enhanced documentation about leak prevention
-
-### 📝 Documentation
-- Added browser configuration requirements to startup output
-- Updated status check with testing instructions
-- Added changelog file
 
 ### ⚠️ Breaking Changes
 - None - fully backward compatible
-
-### 🔄 Migration Notes
-If you already have v1.0.0 installed:
-
-```bash
-cd ~/t0rpoiz0n
-git pull
-sudo ./run --install  # Reinstall to update
-sudo t0rpoiz0n -k     # Stop old version
-sudo t0rpoiz0n -s     # Start with new rules
-```
 
 ---
 
@@ -187,153 +148,74 @@ sudo t0rpoiz0n -s     # Start with new rules
 - ✅ Optimized service file without restrictive hardening
 - ✅ Correct directory ownership for root execution
 
-#### Supported Platforms
-- Arch Linux (primary)
-- Arch-based distributions (Manjaro, EndeavourOS, etc.)
+---
 
-#### MAC Vendor Profiles
-- Samsung, Apple, Huawei, Nokia, Google
-- Dell, HP, ASUS, Lenovo, Motorola
+## Version History Summary
+
+| Version | Date | Key Changes |
+|---------|------|-------------|
+| 1.1.2 | 2025-12-19 | **Auto iptables backend detection**, fixed nftables compatibility |
+| 1.1.1 | 2025-12-19 | Auto module loading, auto-updates |
+| 1.1.0 | 2025-12-12 | DoH/QUIC leak fixes |
+| 1.0.0 | 2025-12-12 | Initial release |
 
 ---
 
-## Versioning
+## Upgrade Paths
 
-This project follows [Semantic Versioning](https://semver.org/):
-- MAJOR version: Incompatible API changes
-- MINOR version: New functionality (backward compatible)
-- PATCH version: Bug fixes (backward compatible)
-
----
-
-## Upgrade Guide
-
-### From 1.1.0 to 1.1.1
-
-**What's Changed:**
-- Automatic iptables module loading (fixes "Table does not exist" error)
-- Persistent module configuration for boot
-- Better error messages
-- No configuration changes needed
-
-**How to Upgrade:**
+### 1.1.1 → 1.1.2 (Recommended for all users)
+**Critical fix for "Table does not exist" errors**
 
 ```bash
-# 1. Stop current instance
-sudo t0rpoiz0n -k
+cd ~/t0rpoiz0n
+cp ~/Downloads/t0rpoiz0n.py ./t0rpoiz0n.py
+sudo cp ./t0rpoiz0n.py /usr/local/bin/t0rpoiz0n
+sudo chmod +x /usr/local/bin/t0rpoiz0n
+```
 
-# 2. Update from GitHub
+### 1.1.0 → 1.1.2
+```bash
 cd ~/t0rpoiz0n
 git pull
-
-# 3. Reinstall
 sudo ./run --install
-
-# 4. Start with new version
-sudo t0rpoiz0n -s
 ```
 
-**Post-Upgrade Verification:**
-
+### 1.0.0 → 1.1.2
 ```bash
-# Verify modules are loaded
-lsmod | grep iptable
-
-# Test as regular user (NOT root)
-curl https://check.torproject.org/api/ip
-
-# Should show IsTor: true
-```
-
-### From 1.0.0 to 1.1.0
-
-**What's Changed:**
-- Enhanced iptables rules for better leak protection
-- New browser warnings on startup
-- No configuration changes needed
-
-**How to Upgrade:**
-
-```bash
-# 1. Stop current instance
-sudo t0rpoiz0n -k
-
-# 2. Update from GitHub
 cd ~/t0rpoiz0n
 git pull
-
-# 3. Reinstall
 sudo ./run --install
-
-# 4. Start with new version
-sudo t0rpoiz0n -s
-```
-
-**Post-Upgrade Testing:**
-
-```bash
-# Test as regular user (NOT root)
-curl https://check.torproject.org/api/ip
-
-# Should show IsTor: true
 ```
 
 ---
 
 ## Known Issues
 
-### v1.1.1
+### All Versions
 - Firefox/Chrome require manual DoH/QUIC disabling for maximum security
 - **Recommended**: Use Tor Browser instead of regular browsers
-- Root user traffic still bypasses Tor (by design, cannot be fixed)
-- On some systems, nftables may conflict with iptables (tool provides guidance)
+- Root user traffic bypasses Tor (by design, cannot be fixed)
 
-### v1.1.0
-- Firefox/Chrome require manual DoH/QUIC disabling for maximum security
-- **Recommended**: Use Tor Browser instead of regular browsers
-- Root user traffic still bypasses Tor (by design, cannot be fixed)
-- iptables module loading not automatic (FIXED in v1.1.1)
+### Version-Specific
 
-### Reporting Issues
-
-Found a bug? Please report it:
-1. Check if already reported: https://github.com/0xb0rn3/t0rpoiz0n/issues
-2. Include:
-   - Version (`t0rpoiz0n -c` shows version)
-   - Operating system
-   - Steps to reproduce
-   - Error messages
-   - Output of `sudo journalctl -u tor-t0rpoiz0n.service -n 50`
-   - Output of `lsmod | grep iptable` (for module-related issues)
+**v1.1.1 and earlier:**
+- ❌ "Table does not exist" errors on nftables-only kernels → **FIXED in v1.1.2**
 
 ---
 
-## Future Plans
+## Future Roadmap
 
-### Planned for v1.2.0
-- [ ] Automatic browser configuration (Firefox profile injection)
+### v1.3.0 (Planned)
+- [ ] Automatic browser configuration
 - [ ] Bridge support for censored regions
-- [ ] Pluggable transports integration
 - [ ] GUI interface
-- [ ] Support for more Linux distributions
-- [ ] Better nftables integration
+- [ ] Multi-distro support
 
-### Planned for v2.0.0
+### v2.0.0 (Planned)
 - [ ] Whonix-style isolation
-- [ ] Container support (Docker/Podman)
-- [ ] Network-wide transparent proxy (gateway mode)
-- [ ] Advanced traffic analysis protection
-- [ ] Native nftables support (drop iptables dependency)
-
----
-
-## Security Advisories
-
-No security advisories at this time.
-
-To receive security notifications:
-- Watch the repository on GitHub
-- Enable email notifications for security advisories
+- [ ] Container support
+- [ ] Network-wide transparent proxy
+- [ ] Native nftables rules
 
 ---
 
