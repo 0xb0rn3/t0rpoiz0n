@@ -2,7 +2,7 @@
 
 All notable changes to t0rpoiz0n will be documented in this file.
 
-## [1.1.3] - 2024-12-19
+## [1.1.3] - 2025-12-19
 
 ### 🔧 CRITICAL FIX
 - **FIXED**: "RULE_APPEND failed (Invalid argument)" errors with nftables backend
