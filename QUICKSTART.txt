@@ -1,0 +1,121 @@
+╔════════════════════════════════════════════════════════════╗
+║     QUICK START: Remove v1.1.0 & Install v1.1.1 Fresh     ║
+╚════════════════════════════════════════════════════════════╝
+
+📥 DOWNLOAD ALL FILES FROM OUTPUTS:
+   • cleanup.sh
+   • t0rpoiz0n.py
+   • run
+   • README.md
+   • CHANGELOG.md
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🗑️  STEP 1: COMPLETE REMOVAL (Copy-Paste These Commands)
+
+# Navigate to where you saved cleanup.sh
+cd ~/Downloads  # or wherever you saved the files
+
+# Make cleanup script executable
+chmod +x cleanup.sh
+
+# Run complete removal (removes EVERYTHING)
+sudo bash cleanup.sh
+
+# You'll be prompted: "Are you sure?" → Press 'y' and Enter
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ STEP 2: VERIFY CLEAN STATE
+
+# Check nothing remains
+which t0rpoiz0n                    # Should be empty
+ls /etc/t0rpoiz0n                  # Should show "No such file"
+systemctl status tor-t0rpoiz0n     # Should show "not found"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📥 STEP 3: FRESH INSTALL v1.1.1
+
+# Go to your t0rpoiz0n git repository
+cd ~/t0rpoiz0n
+
+# Copy new v1.1.1 files over old ones
+cp ~/Downloads/t0rpoiz0n.py ./t0rpoiz0n.py
+cp ~/Downloads/run ./run
+cp ~/Downloads/README.md ./README.md
+cp ~/Downloads/CHANGELOG.md ./CHANGELOG.md
+
+# Make executable
+chmod +x run t0rpoiz0n.py
+
+# Install fresh
+sudo ./run --install
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🧪 STEP 4: TEST NEW INSTALLATION
+
+# Start transparent proxy
+sudo t0rpoiz0n -s
+
+# Test connection (run as REGULAR user, NOT root)
+curl https://check.torproject.org/api/ip
+
+# Should show: "IsTor": true
+
+# Stop when done
+sudo t0rpoiz0n -k
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 WHAT'S NEW IN v1.1.1:
+
+✅ Fixed iptables "Table does not exist" error
+✅ Auto-loads kernel modules (iptable_filter, iptable_nat, etc.)
+✅ Works on nftables systems
+✅ Auto-update checker (checks GitHub every 24h)
+✅ One-click updates from GitHub
+✅ Better error handling
+✅ Persistent module configuration
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🆘 IF CLEANUP FAILS (Manual Method):
+
+sudo systemctl stop tor-t0rpoiz0n.service
+sudo systemctl disable tor-t0rpoiz0n.service
+sudo rm -rf /usr/local/bin/t0rpoiz0n*
+sudo rm -rf /etc/t0rpoiz0n
+sudo rm -rf /usr/share/t0rpoiz0n
+sudo rm -rf /var/lib/t0rpoiz0n
+sudo rm -f /etc/systemd/system/tor-t0rpoiz0n.service
+sudo rm -f /etc/modules-load.d/iptables.conf
+sudo systemctl daemon-reload
+sudo iptables -F && sudo iptables -X
+sudo iptables -t nat -F && sudo iptables -t nat -X
+sudo iptables -P INPUT ACCEPT
+sudo iptables -P OUTPUT ACCEPT
+sudo iptables -P FORWARD ACCEPT
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📚 DETAILED DOCS:
+
+• REMOVAL_GUIDE.md - Complete step-by-step guide
+• README.md - Full documentation with all features
+• CHANGELOG.md - What changed in v1.1.1
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💡 REMEMBER:
+
+• Run cleanup.sh with sudo
+• Replace files in your git repo (~/t0rpoiz0n/)
+• Test as regular user, NOT root
+• Auto-updates check GitHub every 24h
+• Use --no-update-check flag to skip updates
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 You're all set! Enjoy v1.1.1 with auto-updates!
