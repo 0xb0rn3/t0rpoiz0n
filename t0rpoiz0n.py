@@ -2,7 +2,7 @@
 """
 t0rpoiz0n - Advanced Tor Transparent Proxy + MAC Spoofing Tool
 Author: 0xb0rn3 | oxbv1
-Version: 1.1.2 - Fixed iptables backend detection and SyntaxWarning
+Version: 1.1.3 - Fixed nftables compatibility
 Built for Arch Linux
 """
 
@@ -11,11 +11,10 @@ import sys
 import time
 import subprocess
 import random
-import string
 import json
 import argparse
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional
 
 # Color codes
 class Color:
@@ -65,7 +64,7 @@ def banner():
 
             TOR PROXY & MAC SPOOFING FRAMEWORK
                  Engineered by: oxbv1
-                    Version: 1.1.2
+                    Version: 1.1.3
 """
     print(f"{Color.CYAN}{Color.BOLD}{banner_text}{Color.RESET}")
 
@@ -92,14 +91,15 @@ def run_cmd(cmd: str, shell: bool = True, check: bool = True) -> subprocess.Comp
             print(f"{Color.RED}    Error: {e.stderr}{Color.RESET}")
         raise
 
-# Global variable to store detected iptables command
+# Global variables for iptables backend
 IPTABLES_CMD = "iptables"
 IPTABLES_RESTORE_CMD = "iptables-restore"
 IPTABLES_SAVE_CMD = "iptables-save"
+USING_NFT_BACKEND = False
 
 def detect_iptables_backend():
     """Detect and set the correct iptables backend (legacy vs nft)"""
-    global IPTABLES_CMD, IPTABLES_RESTORE_CMD, IPTABLES_SAVE_CMD
+    global IPTABLES_CMD, IPTABLES_RESTORE_CMD, IPTABLES_SAVE_CMD, USING_NFT_BACKEND
     
     print(f"{Color.CYAN}[*] Detecting iptables backend...{Color.RESET}")
     
@@ -109,6 +109,7 @@ def detect_iptables_backend():
         IPTABLES_CMD = "iptables-nft"
         IPTABLES_RESTORE_CMD = "iptables-nft-restore"
         IPTABLES_SAVE_CMD = "iptables-nft-save"
+        USING_NFT_BACKEND = True
         print(f"{Color.GREEN}[✓] Using iptables-nft (nftables backend){Color.RESET}")
         return True
     
@@ -118,111 +119,23 @@ def detect_iptables_backend():
         IPTABLES_CMD = "iptables-legacy"
         IPTABLES_RESTORE_CMD = "iptables-legacy-restore"
         IPTABLES_SAVE_CMD = "iptables-legacy-save"
+        USING_NFT_BACKEND = False
         print(f"{Color.GREEN}[✓] Using iptables-legacy (legacy backend){Color.RESET}")
         return True
     
-    # Try generic iptables (might work after module loading)
+    # Try generic iptables
     test_generic = run_cmd("iptables -L -n 2>/dev/null", check=False)
     if test_generic.returncode == 0:
-        # Keep defaults
+        USING_NFT_BACKEND = False
         print(f"{Color.GREEN}[✓] Using iptables (generic){Color.RESET}")
         return True
     
     print(f"{Color.YELLOW}[!] Could not detect working iptables backend{Color.RESET}")
-    print(f"{Color.YELLOW}[!] Will attempt to use iptables-nft...{Color.RESET}")
     IPTABLES_CMD = "iptables-nft"
     IPTABLES_RESTORE_CMD = "iptables-nft-restore"
     IPTABLES_SAVE_CMD = "iptables-nft-save"
+    USING_NFT_BACKEND = True
     return False
-
-def switch_to_iptables_nft():
-    """Switch system to use iptables-nft instead of iptables-legacy"""
-    print(f"\n{Color.CYAN}[*] Switching to iptables-nft backend...{Color.RESET}")
-    
-    alternatives = [
-        ("iptables", "iptables-nft"),
-        ("ip6tables", "ip6tables-nft"),
-        ("iptables-restore", "iptables-nft-restore"),
-        ("ip6tables-restore", "ip6tables-nft-restore"),
-        ("iptables-save", "iptables-nft-save"),
-        ("ip6tables-save", "ip6tables-nft-save"),
-    ]
-    
-    for generic, nft in alternatives:
-        cmd = f"update-alternatives --set {generic} /usr/sbin/{nft}"
-        result = run_cmd(cmd, check=False)
-        if result.returncode == 0:
-            print(f"{Color.GREEN}[✓] Set {generic} -> {nft}{Color.RESET}")
-    
-    print(f"{Color.GREEN}[✓] Switched to iptables-nft backend{Color.RESET}\n")
-
-def load_iptables_modules():
-    """Load required iptables kernel modules or detect nft backend"""
-    # First, try to detect if iptables-nft works
-    if detect_iptables_backend():
-        # If nft backend works, we don't need legacy modules
-        if "nft" in IPTABLES_CMD:
-            print(f"{Color.GREEN}[✓] Using nftables backend - no legacy modules needed{Color.RESET}")
-            return True
-    
-    # If using legacy, try to load modules
-    print(f"{Color.CYAN}[*] Attempting to load legacy iptables modules...{Color.RESET}")
-    
-    modules = ['iptable_filter', 'iptable_nat', 'iptable_mangle', 'ip_tables']
-    loaded = []
-    failed = []
-    
-    for module in modules:
-        # Check if module is already loaded
-        check_result = run_cmd(f"lsmod | grep -q {module}", check=False)
-        
-        if check_result.returncode == 0:
-            loaded.append(module)
-            continue
-        
-        # Try to load the module
-        load_result = run_cmd(f"modprobe {module}", check=False)
-        
-        if load_result.returncode == 0:
-            loaded.append(module)
-            print(f"{Color.GREEN}[✓] Loaded module: {module}{Color.RESET}")
-        else:
-            failed.append(module)
-    
-    if failed and len(loaded) == 0:
-        # All modules failed - switch to nft
-        print(f"\n{Color.YELLOW}[!] Legacy iptables modules not available{Color.RESET}")
-        print(f"{Color.CYAN}[*] Switching to iptables-nft backend...{Color.RESET}")
-        switch_to_iptables_nft()
-        detect_iptables_backend()  # Re-detect after switch
-        return True
-    elif failed:
-        print(f"\n{Color.YELLOW}[!] Some modules unavailable: {', '.join(failed)}{Color.RESET}")
-        print(f"{Color.CYAN}[*] Will use nftables backend instead{Color.RESET}")
-        switch_to_iptables_nft()
-        detect_iptables_backend()
-        return True
-    else:
-        print(f"{Color.GREEN}[✓] All legacy iptables modules loaded{Color.RESET}")
-        return True
-
-def ensure_iptables_legacy():
-    """Ensure iptables-legacy is available and create modules config for boot"""
-    # Create modules-load config for persistence
-    modules_conf = Path("/etc/modules-load.d/iptables.conf")
-    
-    if not modules_conf.exists():
-        print(f"{Color.CYAN}[*] Creating persistent modules configuration...{Color.RESET}")
-        try:
-            modules_conf.parent.mkdir(parents=True, exist_ok=True)
-            modules_conf.write_text("# iptables kernel modules for t0rpoiz0n\n"
-                                   "iptable_filter\n"
-                                   "iptable_nat\n"
-                                   "iptable_mangle\n"
-                                   "ip_tables\n")
-            print(f"{Color.GREEN}[✓] Modules will load automatically on boot{Color.RESET}")
-        except Exception as e:
-            print(f"{Color.YELLOW}[!] Could not create modules config: {e}{Color.RESET}")
 
 def check_dependencies() -> bool:
     """Check if required packages are installed"""
@@ -247,7 +160,6 @@ def get_default_interface() -> Optional[str]:
     if result.returncode == 0 and result.stdout.strip():
         return result.stdout.strip()
     
-    # Fallback: get first non-loopback interface
     result = run_cmd("ip link show | grep -v 'lo:' | grep 'state UP' | awk '{print $2}' | tr -d ':' | head -1", check=False)
     
     if result.returncode == 0 and result.stdout.strip():
@@ -268,16 +180,9 @@ def change_mac(interface: str, vendor: Optional[str] = None) -> bool:
     """Change MAC address of network interface"""
     print(f"{Color.CYAN}[*] Changing MAC address for {interface}...{Color.RESET}")
     
-    # Bring interface down
     run_cmd(f"ip link set {interface} down", check=False)
-    
-    # Generate new MAC
     new_mac = generate_random_mac(vendor)
-    
-    # Change MAC
     result = run_cmd(f"macchanger -m {new_mac} {interface}", check=False)
-    
-    # Bring interface up
     run_cmd(f"ip link set {interface} up", check=False)
     
     if result.returncode == 0:
@@ -287,9 +192,9 @@ def change_mac(interface: str, vendor: Optional[str] = None) -> bool:
         print(f"{Color.RED}[✗] Failed to change MAC address{Color.RESET}")
         return False
 
-def create_iptables_rules():
-    """Create iptables rules for transparent proxy"""
-    rules = """# t0rpoiz0n iptables rules
+def create_iptables_rules_nft():
+    """Create nftables-compatible iptables rules"""
+    rules = """# t0rpoiz0n iptables rules (nftables backend compatible)
 # Generated for transparent Tor proxy
 
 *nat
@@ -302,7 +207,73 @@ def create_iptables_rules():
 -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 53
 -A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports 53
 
-# Block DNS-over-TLS (DoT)
+# Block DNS-over-TLS
+-A OUTPUT -p tcp --dport 853 -j REJECT
+-A OUTPUT -p udp --dport 853 -j REJECT
+
+# Block QUIC/HTTP3
+-A OUTPUT -p udp --dport 443 -j REJECT
+
+# Don't redirect local traffic
+-A OUTPUT -d 127.0.0.0/8 -j RETURN
+-A OUTPUT -d 192.168.0.0/16 -j RETURN
+-A OUTPUT -d 10.0.0.0/8 -j RETURN
+-A OUTPUT -d 172.16.0.0/12 -j RETURN
+
+# Redirect all other TCP traffic to Tor TransPort
+-A OUTPUT -p tcp -j REDIRECT --to-ports 9040
+
+COMMIT
+
+*filter
+:INPUT ACCEPT [0:0]
+:FORWARD ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+
+# Allow loopback
+-A INPUT -i lo -j ACCEPT
+-A OUTPUT -o lo -j ACCEPT
+
+# Allow established connections
+-A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+-A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+# Allow DNS to localhost
+-A OUTPUT -p udp --dport 53 -d 127.0.0.1 -j ACCEPT
+-A OUTPUT -p tcp --dport 53 -d 127.0.0.1 -j ACCEPT
+
+# Allow traffic to Tor ports
+-A OUTPUT -p tcp --dport 9040 -j ACCEPT
+-A OUTPUT -p tcp --dport 9050 -j ACCEPT
+
+# Block remaining UDP (prevent leaks)
+-A OUTPUT -p udp -j REJECT
+
+COMMIT
+"""
+    
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    rules_file = DATA_DIR / "iptables.rules"
+    rules_file.write_text(rules)
+    
+    return rules_file
+
+def create_iptables_rules_legacy():
+    """Create legacy iptables rules with owner matching"""
+    rules = """# t0rpoiz0n iptables rules (legacy backend)
+# Generated for transparent Tor proxy
+
+*nat
+:PREROUTING ACCEPT [0:0]
+:INPUT ACCEPT [0:0]
+:OUTPUT ACCEPT [0:0]
+:POSTROUTING ACCEPT [0:0]
+
+# Redirect DNS to Tor DNSPort
+-A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports 53
+-A OUTPUT -p tcp --dport 53 -j REDIRECT --to-ports 53
+
+# Block DNS-over-TLS
 -A OUTPUT -p tcp --dport 853 -j REJECT
 -A OUTPUT -p udp --dport 853 -j REJECT
 
@@ -328,7 +299,7 @@ COMMIT
 :FORWARD ACCEPT [0:0]
 :OUTPUT ACCEPT [0:0]
 
-# Block all IPv6 traffic
+# Block IPv6-ICMP
 -A INPUT -p ipv6-icmp -j DROP
 -A OUTPUT -p ipv6-icmp -j DROP
 -A FORWARD -p ipv6-icmp -j DROP
@@ -341,7 +312,7 @@ COMMIT
 -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
-# Allow Tor
+# Allow Tor user
 -A OUTPUT -m owner --uid-owner tor -j ACCEPT
 
 # Allow DNS to localhost
@@ -352,18 +323,26 @@ COMMIT
 -A OUTPUT -p tcp --dport 9040 -j ACCEPT
 -A OUTPUT -p tcp --dport 9050 -j ACCEPT
 
-# Block everything else UDP (prevent leaks)
+# Block remaining UDP
 -A OUTPUT -p udp -j REJECT
 
 COMMIT
 """
     
-    # Ensure data directory exists
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     rules_file = DATA_DIR / "iptables.rules"
     rules_file.write_text(rules)
     
     return rules_file
+
+def create_iptables_rules():
+    """Create appropriate iptables rules based on detected backend"""
+    if USING_NFT_BACKEND:
+        print(f"{Color.CYAN}[*] Creating nftables-compatible rules...{Color.RESET}")
+        return create_iptables_rules_nft()
+    else:
+        print(f"{Color.CYAN}[*] Creating legacy iptables rules...{Color.RESET}")
+        return create_iptables_rules_legacy()
 
 def create_torrc():
     """Create Tor configuration file"""
@@ -395,7 +374,6 @@ BandwidthBurst 2 MB
     torrc_path = Path("/etc/tor/torrc")
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Backup original if exists
     if torrc_path.exists():
         run_cmd(f"cp {torrc_path} {BACKUP_DIR}/torrc.backup", check=False)
     
@@ -420,7 +398,6 @@ TimeoutSec=60
 Restart=on-failure
 RestartSec=5
 
-# Run as root to bind to port 53
 # Security capabilities
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
 NoNewPrivileges=yes
@@ -436,10 +413,7 @@ WantedBy=multi-user.target
     service_path.write_text(service)
     os.chmod(service_path, 0o644)
     
-    # Reload systemd
     run_cmd("systemctl daemon-reload")
-    
-    # Grant capabilities to tor binary
     run_cmd("setcap 'cap_net_bind_service=+ep' /usr/bin/tor")
     
     return service_path
@@ -458,38 +432,48 @@ def first_time_setup():
     print(f"{Color.CYAN}{Color.BOLD}[*] Running First-Time Setup{Color.RESET}")
     print(f"{Color.CYAN}{'='*60}{Color.RESET}\n")
     
-    # Check dependencies
     print(f"{Color.CYAN}[*] Checking dependencies...{Color.RESET}")
     if not check_dependencies():
         return False
     print(f"{Color.GREEN}[✓] Dependencies OK{Color.RESET}")
     
-    # Create directories
     print(f"{Color.CYAN}[*] Creating directories...{Color.RESET}")
     setup_directories()
     print(f"{Color.GREEN}[✓] Directories created{Color.RESET}")
     
-    # Create iptables rules
-    print(f"{Color.CYAN}[*] Creating iptables rules...{Color.RESET}")
+    # Detect backend first
+    detect_iptables_backend()
+    
+    # Create appropriate rules
     create_iptables_rules()
     print(f"{Color.GREEN}[✓] iptables rules created{Color.RESET}")
     
-    # Create Tor config
     print(f"{Color.CYAN}[*] Creating Tor configuration...{Color.RESET}")
     create_torrc()
     print(f"{Color.GREEN}[✓] Tor config created{Color.RESET}")
     
-    # Create systemd service
     print(f"{Color.CYAN}[*] Creating systemd service...{Color.RESET}")
     create_systemd_service()
     print(f"{Color.GREEN}[✓] Service created{Color.RESET}")
     
-    # Load iptables modules and create persistent config
-    load_iptables_modules()
-    ensure_iptables_legacy()
-    
     print(f"\n{Color.GREEN}[✓] Setup complete!{Color.RESET}")
     return True
+
+def apply_ipv6_blocks_nft():
+    """Apply IPv6 blocks using nft directly for nftables backend"""
+    print(f"{Color.CYAN}[*] Applying IPv6 blocks via nft...{Color.RESET}")
+    
+    # Check if table exists, create if not
+    run_cmd("nft list table inet filter 2>/dev/null || nft add table inet filter", check=False)
+    
+    # Add chain if not exists
+    run_cmd("nft add chain inet filter output { type filter hook output priority 0 \\; }", check=False)
+    
+    # Block IPv6
+    run_cmd("nft add rule inet filter output meta l4proto ipv6-icmp drop", check=False)
+    run_cmd("nft add rule inet filter output ip6 version 6 drop", check=False)
+    
+    print(f"{Color.GREEN}[✓] IPv6 blocked via nft{Color.RESET}")
 
 def start_transparent_proxy():
     """Start Tor transparent proxy"""
@@ -497,10 +481,10 @@ def start_transparent_proxy():
     print(f"{Color.CYAN}{Color.BOLD}[*] Starting Transparent Proxy{Color.RESET}")
     print(f"{Color.CYAN}{'='*60}{Color.RESET}\n")
     
-    # Load iptables modules first
-    load_iptables_modules()
+    # Detect backend
+    detect_iptables_backend()
     
-    # Stop any existing Tor instances
+    # Stop existing Tor
     run_cmd("systemctl stop tor.service tor-t0rpoiz0n.service", check=False)
     run_cmd("killall tor", check=False)
     time.sleep(2)
@@ -511,11 +495,10 @@ def start_transparent_proxy():
     run_cmd("sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1")
     print(f"{Color.GREEN}[✓] IPv6 disabled{Color.RESET}")
     
-    # Backup current DNS
+    # Backup and set DNS
     if Path("/etc/resolv.conf").exists():
         run_cmd(f"cp /etc/resolv.conf {BACKUP_DIR}/resolv.conf.backup", check=False)
     
-    # Set DNS to localhost
     Path("/etc/resolv.conf").write_text("nameserver 127.0.0.1\n")
     print(f"{Color.GREEN}[✓] DNS configured{Color.RESET}")
     
@@ -525,7 +508,6 @@ def start_transparent_proxy():
     
     if result.returncode != 0:
         print(f"{Color.RED}[✗] Failed to start Tor service{Color.RESET}")
-        print(f"{Color.YELLOW}[*] Checking logs...{Color.RESET}")
         run_cmd("journalctl -u tor-t0rpoiz0n.service -n 20 --no-pager")
         return False
     
@@ -534,29 +516,33 @@ def start_transparent_proxy():
     
     # Apply iptables rules
     print(f"{Color.CYAN}[*] Applying iptables rules...{Color.RESET}")
-    rules_path = DATA_DIR / "iptables.rules"
     
-    # Flush existing rules using detected backend
+    # Flush existing
     try:
         run_cmd(f"{IPTABLES_CMD} -F")
         run_cmd(f"{IPTABLES_CMD} -X")
         run_cmd(f"{IPTABLES_CMD} -t nat -F")
         run_cmd(f"{IPTABLES_CMD} -t nat -X")
-    except subprocess.CalledProcessError as e:
-        print(f"{Color.YELLOW}[!] Warning: Could not flush iptables rules{Color.RESET}")
-        print(f"{Color.CYAN}    Attempting to continue...{Color.RESET}")
+    except:
+        pass
     
-    # Apply new rules using detected backend
+    # Regenerate rules for current backend
+    rules_path = create_iptables_rules()
+    
+    # Apply rules
     try:
         run_cmd(f"{IPTABLES_RESTORE_CMD} < {rules_path}")
         print(f"{Color.GREEN}[✓] iptables rules applied using {IPTABLES_CMD}{Color.RESET}")
     except subprocess.CalledProcessError as e:
         print(f"{Color.RED}[✗] Failed to apply iptables rules{Color.RESET}")
         print(f"{Color.YELLOW}[!] Backend: {IPTABLES_CMD}{Color.RESET}")
-        print(f"{Color.YELLOW}[*] Try running: sudo t0rpoiz0n --setup{Color.RESET}")
         return False
     
-    # Wait for Tor to bootstrap
+    # Additional IPv6 blocking for nft
+    if USING_NFT_BACKEND:
+        apply_ipv6_blocks_nft()
+    
+    # Wait for bootstrap
     print(f"{Color.CYAN}[*] Waiting for Tor to bootstrap...{Color.RESET}")
     
     for i in range(30):
@@ -565,26 +551,19 @@ def start_transparent_proxy():
             time.sleep(2)
             break
         time.sleep(1)
-    else:
-        print(f"{Color.YELLOW}[!] Tor may still be bootstrapping...{Color.RESET}")
     
     print(f"{Color.GREEN}[✓] Transparent proxy activated{Color.RESET}")
     
-    # Show browser warning
+    # Browser warning
     print(f"\n{Color.YELLOW}{'='*60}{Color.RESET}")
-    print(f"{Color.YELLOW}{Color.BOLD}[!] IMPORTANT: Browser Configuration Required{Color.RESET}")
+    print(f"{Color.YELLOW}{Color.BOLD}[!] IMPORTANT: Browser Configuration{Color.RESET}")
     print(f"{Color.YELLOW}{'='*60}{Color.RESET}")
-    print(f"{Color.CYAN}Modern browsers may leak your IP through:{Color.RESET}")
-    print(f"  • DNS-over-HTTPS (DoH)")
-    print(f"  • QUIC/HTTP3 protocol")
-    print(f"  • WebRTC")
-    print(f"\n{Color.GREEN}RECOMMENDED: Use Tor Browser{Color.RESET}")
+    print(f"{Color.GREEN}RECOMMENDED: Use Tor Browser{Color.RESET}")
     print(f"  Download: https://www.torproject.org/download/\n")
-    print(f"{Color.YELLOW}OR configure Firefox manually:{Color.RESET}")
-    print(f"  1. Go to: {Color.CYAN}about:config{Color.RESET}")
-    print(f"  2. Set {Color.CYAN}network.trr.mode = 5{Color.RESET} (disable DoH)")
-    print(f"  3. Set {Color.CYAN}network.http.http3.enabled = false{Color.RESET} (disable QUIC)")
-    print(f"  4. Set {Color.CYAN}media.peerconnection.enabled = false{Color.RESET} (disable WebRTC)")
+    print(f"{Color.YELLOW}OR configure Firefox:{Color.RESET}")
+    print(f"  1. about:config → network.trr.mode = 5")
+    print(f"  2. about:config → network.http.http3.enabled = false")
+    print(f"  3. about:config → media.peerconnection.enabled = false")
     print(f"{Color.YELLOW}{'='*60}{Color.RESET}\n")
     
     return True
@@ -595,15 +574,12 @@ def stop_transparent_proxy():
     print(f"{Color.CYAN}{Color.BOLD}[*] Stopping Transparent Proxy{Color.RESET}")
     print(f"{Color.CYAN}{'='*60}{Color.RESET}\n")
     
-    # Re-detect backend in case it changed
     detect_iptables_backend()
     
-    # Stop Tor
     print(f"{Color.CYAN}[*] Stopping Tor service...{Color.RESET}")
     run_cmd("systemctl stop tor-t0rpoiz0n.service", check=False)
     print(f"{Color.GREEN}[✓] Tor stopped{Color.RESET}")
     
-    # Flush iptables using detected backend
     print(f"{Color.CYAN}[*] Flushing iptables rules...{Color.RESET}")
     try:
         run_cmd(f"{IPTABLES_CMD} -F")
@@ -613,20 +589,22 @@ def stop_transparent_proxy():
         run_cmd(f"{IPTABLES_CMD} -P INPUT ACCEPT")
         run_cmd(f"{IPTABLES_CMD} -P FORWARD ACCEPT")
         run_cmd(f"{IPTABLES_CMD} -P OUTPUT ACCEPT")
-        print(f"{Color.GREEN}[✓] iptables flushed using {IPTABLES_CMD}{Color.RESET}")
-    except subprocess.CalledProcessError:
+        print(f"{Color.GREEN}[✓] iptables flushed{Color.RESET}")
+    except:
         print(f"{Color.YELLOW}[!] Could not flush iptables{Color.RESET}")
     
-    # Re-enable IPv6
+    # Clean nft rules if using nft
+    if USING_NFT_BACKEND:
+        run_cmd("nft delete table inet filter 2>/dev/null", check=False)
+    
     print(f"{Color.CYAN}[*] Re-enabling IPv6...{Color.RESET}")
     run_cmd("sysctl -w net.ipv6.conf.all.disable_ipv6=0 >/dev/null 2>&1")
     run_cmd("sysctl -w net.ipv6.conf.default.disable_ipv6=0 >/dev/null 2>&1")
     print(f"{Color.GREEN}[✓] IPv6 re-enabled{Color.RESET}")
     
-    # Restore DNS
     backup_resolv = BACKUP_DIR / "resolv.conf.backup"
     if backup_resolv.exists():
-        print(f"{Color.CYAN}[*] Restoring DNS configuration...{Color.RESET}")
+        print(f"{Color.CYAN}[*] Restoring DNS...{Color.RESET}")
         run_cmd(f"cp {backup_resolv} /etc/resolv.conf", check=False)
         print(f"{Color.GREEN}[✓] DNS restored{Color.RESET}")
     
@@ -641,8 +619,6 @@ def restart_tor():
     if result.returncode == 0:
         time.sleep(5)
         print(f"{Color.GREEN}[✓] New Tor circuit established{Color.RESET}")
-        
-        # Try to get new IP
         check_tor_status()
         return True
     else:
@@ -655,10 +631,8 @@ def check_tor_status():
     print(f"{Color.CYAN}{Color.BOLD}[*] Checking Tor Status{Color.RESET}")
     print(f"{Color.CYAN}{'='*60}{Color.RESET}\n")
     
-    # Detect iptables backend for status display
     detect_iptables_backend()
     
-    # Check service status
     result = run_cmd("systemctl is-active tor-t0rpoiz0n.service", check=False)
     
     if result.stdout.strip() == "active":
@@ -667,10 +641,8 @@ def check_tor_status():
         print(f"{Color.RED}[✗] Tor service: Inactive{Color.RESET}")
         return False
     
-    # Check connection
     print(f"{Color.CYAN}[*] Testing Tor connection...{Color.RESET}")
     
-    # Test with curl using Tor SOCKS proxy
     result = run_cmd("curl -s --socks5 127.0.0.1:9050 https://check.torproject.org/api/ip", check=False)
     
     if result.returncode == 0:
@@ -682,30 +654,23 @@ def check_tor_status():
             else:
                 print(f"{Color.RED}[✗] Not connected through Tor!{Color.RESET}")
         except:
-            print(f"{Color.YELLOW}[!] Could not parse Tor check response{Color.RESET}")
+            print(f"{Color.YELLOW}[!] Could not parse response{Color.RESET}")
     else:
-        print(f"{Color.YELLOW}[!] Could not test Tor connection{Color.RESET}")
+        print(f"{Color.YELLOW}[!] Could not test connection{Color.RESET}")
     
-    # Show bootstrap status
     result = run_cmd("journalctl -u tor-t0rpoiz0n.service -n 3 --no-pager | grep -i bootstrap", check=False)
     if result.stdout.strip():
-        print(f"\n{Color.CYAN}[*] Latest bootstrap messages:{Color.RESET}")
+        print(f"\n{Color.CYAN}[*] Bootstrap status:{Color.RESET}")
         print(result.stdout.strip())
     
-    # Show iptables rule counts using detected backend
-    print(f"\n{Color.CYAN}[*] iptables statistics (using {IPTABLES_CMD}):{Color.RESET}")
+    print(f"\n{Color.CYAN}[*] iptables statistics (backend: {IPTABLES_CMD}):{Color.RESET}")
     result = run_cmd(f"{IPTABLES_CMD} -L -n -v | head -15", check=False)
     if result.returncode == 0:
         print(result.stdout)
-    else:
-        print(f"{Color.YELLOW}[!] Could not retrieve iptables statistics{Color.RESET}")
     
     print(f"\n{Color.YELLOW}{'='*60}{Color.RESET}")
-    print(f"{Color.YELLOW}[!] Testing Instructions:{Color.RESET}")
-    print(f"{Color.CYAN}Run as regular user (NOT root):{Color.RESET}")
+    print(f"{Color.YELLOW}[!] Test as regular user (NOT root):{Color.RESET}")
     print(f"  curl https://check.torproject.org/api/ip")
-    print(f"\n{Color.CYAN}Or visit in browser:{Color.RESET}")
-    print(f"  https://check.torproject.org")
     print(f"  https://whoer.net")
     print(f"{Color.YELLOW}{'='*60}{Color.RESET}\n")
     
@@ -721,41 +686,35 @@ def main():
     parser.add_argument('-s', '--start', action='store_true',
                        help='Start transparent proxy')
     parser.add_argument('-k', '--stop', action='store_true',
-                       help='Stop transparent proxy and restore clearnet')
+                       help='Stop transparent proxy')
     parser.add_argument('-r', '--restart', action='store_true',
-                       help='Restart Tor and get new circuit/IP')
+                       help='Restart Tor (new circuit)')
     parser.add_argument('-c', '--check', action='store_true',
-                       help='Check Tor status and connection')
+                       help='Check Tor status')
     parser.add_argument('-m', '--mac', action='store_true',
                        help='Change MAC address')
     parser.add_argument('-v', '--vendor', type=str,
-                       help='Use specific MAC vendor prefix')
+                       help='MAC vendor prefix')
     parser.add_argument('-i', '--interface', type=str,
-                       help='Specify network interface')
+                       help='Network interface')
     parser.add_argument('--setup', action='store_true',
-                       help='Re-run first-time setup')
+                       help='Re-run setup')
     
     args = parser.parse_args()
     
-    # Show banner
     banner()
-    
-    # Check root
     check_root()
     
-    # Run setup if needed or requested
     if args.setup or not DATA_DIR.exists():
         if not first_time_setup():
             sys.exit(1)
         if args.setup:
             sys.exit(0)
     
-    # Handle MAC spoofing
     if args.mac:
         interface = args.interface or get_default_interface()
         if not interface:
-            print(f"{Color.RED}[✗] Could not detect network interface{Color.RESET}")
-            print(f"{Color.YELLOW}[*] Specify with: -i <interface>{Color.RESET}")
+            print(f"{Color.RED}[✗] Could not detect interface{Color.RESET}")
             sys.exit(1)
         
         change_mac(interface, args.vendor)
@@ -763,7 +722,6 @@ def main():
         if not args.start:
             sys.exit(0)
     
-    # Handle commands
     if args.start:
         if not start_transparent_proxy():
             sys.exit(1)
@@ -776,11 +734,11 @@ def main():
     else:
         parser.print_help()
         print(f"\n{Color.CYAN}Examples:{Color.RESET}")
-        print(f"  {Color.GREEN}sudo t0rpoiz0n -s{Color.RESET}              # Start transparent proxy")
-        print(f"  {Color.GREEN}sudo t0rpoiz0n -s -m -v apple{Color.RESET}  # Start with MAC spoofing")
+        print(f"  {Color.GREEN}sudo t0rpoiz0n -s{Color.RESET}              # Start")
+        print(f"  {Color.GREEN}sudo t0rpoiz0n -s -m -v apple{Color.RESET}  # Start + MAC")
         print(f"  {Color.GREEN}sudo t0rpoiz0n -c{Color.RESET}              # Check status")
-        print(f"  {Color.GREEN}sudo t0rpoiz0n -r{Color.RESET}              # Change identity")
-        print(f"  {Color.GREEN}sudo t0rpoiz0n -k{Color.RESET}              # Stop and restore clearnet\n")
+        print(f"  {Color.GREEN}sudo t0rpoiz0n -r{Color.RESET}              # New identity")
+        print(f"  {Color.GREEN}sudo t0rpoiz0n -k{Color.RESET}              # Stop\n")
 
 if __name__ == "__main__":
     main()
