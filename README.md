@@ -19,6 +19,7 @@ Version: **1.1.1**
 - ✅ **DNS through Tor** - All DNS queries via Tor DNSPort
 - ✅ **Easy Identity Changes** - New Tor circuit with one command
 - ✅ **Auto-loads iptables modules** - Works on nftables systems
+- ✅ **Auto-Update Check** - Checks GitHub for updates every 24 hours
 
 ---
 
@@ -62,6 +63,42 @@ The installer will:
 4. Grant necessary capabilities
 5. Make `t0rpoiz0n` available system-wide
 6. Auto-load iptables kernel modules
+
+---
+
+## 🔄 Auto-Update Feature
+
+t0rpoiz0n includes an automatic update checker that ensures you're always running the latest version.
+
+### How It Works
+
+- **Automatic Check**: Every 24 hours, the tool checks GitHub for new versions
+- **User Prompt**: If an update is available, you'll be prompted to install it
+- **One-Click Update**: Simply press 'y' to auto-update from GitHub
+- **Silent When Current**: No interruption if you're already on the latest version
+
+### Update Commands
+
+```bash
+# Let the tool auto-update (prompted every 24 hours)
+sudo t0rpoiz0n -s
+
+# Skip update check for this run
+sudo t0rpoiz0n --no-update-check -s
+
+# Force check for updates (run manually)
+cd ~/t0rpoiz0n
+git pull
+sudo ./run --install
+```
+
+### Update Process
+
+When an update is available:
+1. Tool detects new version on GitHub
+2. Prompts you: "Would you like to update now? [y/N]"
+3. If yes: Automatically pulls latest code and reinstalls
+4. If no: Continues with current version
 
 ---
 
@@ -191,11 +228,16 @@ This tool fixes all the issues from the original archtorify:
 ### Architecture
 
 ```
-User Space
+User Command
+    ↓
+Auto-Update Checker (NEW!)
+    ├→ Checks GitHub every 24h
+    ├→ Prompts for update if available
+    └→ Auto-pulls and reinstalls
     ↓
 t0rpoiz0n (Python)
     ↓
-├→ Module Loader (NEW!)
+├→ Module Loader
 │   ├→ iptable_filter
 │   ├→ iptable_nat
 │   ├→ iptable_mangle
@@ -223,7 +265,9 @@ t0rpoiz0n (Python)
 - `/usr/share/t0rpoiz0n/` - Data directory
 - `/var/lib/t0rpoiz0n/backups/` - Original file backups
 - `/etc/t0rpoiz0n/config.json` - Tool configuration
-- `/etc/modules-load.d/iptables.conf` - Persistent module config (NEW!)
+- `/etc/modules-load.d/iptables.conf` - Persistent module config
+- `/etc/t0rpoiz0n/.last_update_check` - Update check timestamp (NEW!)
+- `/etc/t0rpoiz0n/.repo_path` - Repository path for updates (NEW!)
 
 ### Network Flow
 
