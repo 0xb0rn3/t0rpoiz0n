@@ -2,7 +2,7 @@
 """
 t0rpoiz0n - Advanced Tor Transparent Proxy + MAC Spoofing Tool
 Author: 0xb0rn3 | oxbv1
-Version: 1.1.1 - Fixed iptables kernel module loading
+Version: 1.1.2 - Fixed iptables backend detection and SyntaxWarning
 Built for Arch Linux
 """
 
@@ -50,7 +50,7 @@ MAC_VENDORS = {
 
 def banner():
     """Display tool banner"""
-    print(f"""{Color.CYAN}{Color.BOLD}
+    banner_text = r"""
    /$$      /$$$$$$                                /$$            /$$$$$$           
   | $$     /$$$_  $$                              |__/           /$$$_  $$          
  /$$$$$$  | $$$$\ $$  /$$$$$$   /$$$$$$   /$$$$$$  /$$ /$$$$$$$$| $$$$\ $$ /$$$$$$$ 
@@ -65,8 +65,9 @@ def banner():
 
             TOR PROXY & MAC SPOOFING FRAMEWORK
                  Engineered by: oxbv1
-                    Version: 1.1.1
-{Color.RESET}""")
+                    Version: 1.1.2
+"""
+    print(f"{Color.CYAN}{Color.BOLD}{banner_text}{Color.RESET}")
 
 def check_root():
     """Ensure script is run as root"""
@@ -91,13 +92,85 @@ def run_cmd(cmd: str, shell: bool = True, check: bool = True) -> subprocess.Comp
             print(f"{Color.RED}    Error: {e.stderr}{Color.RESET}")
         raise
 
+# Global variable to store detected iptables command
+IPTABLES_CMD = "iptables"
+IPTABLES_RESTORE_CMD = "iptables-restore"
+IPTABLES_SAVE_CMD = "iptables-save"
+
+def detect_iptables_backend():
+    """Detect and set the correct iptables backend (legacy vs nft)"""
+    global IPTABLES_CMD, IPTABLES_RESTORE_CMD, IPTABLES_SAVE_CMD
+    
+    print(f"{Color.CYAN}[*] Detecting iptables backend...{Color.RESET}")
+    
+    # Try iptables-nft first (modern Arch default)
+    test_nft = run_cmd("iptables-nft -L -n 2>/dev/null", check=False)
+    if test_nft.returncode == 0:
+        IPTABLES_CMD = "iptables-nft"
+        IPTABLES_RESTORE_CMD = "iptables-nft-restore"
+        IPTABLES_SAVE_CMD = "iptables-nft-save"
+        print(f"{Color.GREEN}[✓] Using iptables-nft (nftables backend){Color.RESET}")
+        return True
+    
+    # Try legacy iptables
+    test_legacy = run_cmd("iptables-legacy -L -n 2>/dev/null", check=False)
+    if test_legacy.returncode == 0:
+        IPTABLES_CMD = "iptables-legacy"
+        IPTABLES_RESTORE_CMD = "iptables-legacy-restore"
+        IPTABLES_SAVE_CMD = "iptables-legacy-save"
+        print(f"{Color.GREEN}[✓] Using iptables-legacy (legacy backend){Color.RESET}")
+        return True
+    
+    # Try generic iptables (might work after module loading)
+    test_generic = run_cmd("iptables -L -n 2>/dev/null", check=False)
+    if test_generic.returncode == 0:
+        # Keep defaults
+        print(f"{Color.GREEN}[✓] Using iptables (generic){Color.RESET}")
+        return True
+    
+    print(f"{Color.YELLOW}[!] Could not detect working iptables backend{Color.RESET}")
+    print(f"{Color.YELLOW}[!] Will attempt to use iptables-nft...{Color.RESET}")
+    IPTABLES_CMD = "iptables-nft"
+    IPTABLES_RESTORE_CMD = "iptables-nft-restore"
+    IPTABLES_SAVE_CMD = "iptables-nft-save"
+    return False
+
+def switch_to_iptables_nft():
+    """Switch system to use iptables-nft instead of iptables-legacy"""
+    print(f"\n{Color.CYAN}[*] Switching to iptables-nft backend...{Color.RESET}")
+    
+    alternatives = [
+        ("iptables", "iptables-nft"),
+        ("ip6tables", "ip6tables-nft"),
+        ("iptables-restore", "iptables-nft-restore"),
+        ("ip6tables-restore", "ip6tables-nft-restore"),
+        ("iptables-save", "iptables-nft-save"),
+        ("ip6tables-save", "ip6tables-nft-save"),
+    ]
+    
+    for generic, nft in alternatives:
+        cmd = f"update-alternatives --set {generic} /usr/sbin/{nft}"
+        result = run_cmd(cmd, check=False)
+        if result.returncode == 0:
+            print(f"{Color.GREEN}[✓] Set {generic} -> {nft}{Color.RESET}")
+    
+    print(f"{Color.GREEN}[✓] Switched to iptables-nft backend{Color.RESET}\n")
+
 def load_iptables_modules():
-    """Load required iptables kernel modules"""
+    """Load required iptables kernel modules or detect nft backend"""
+    # First, try to detect if iptables-nft works
+    if detect_iptables_backend():
+        # If nft backend works, we don't need legacy modules
+        if "nft" in IPTABLES_CMD:
+            print(f"{Color.GREEN}[✓] Using nftables backend - no legacy modules needed{Color.RESET}")
+            return True
+    
+    # If using legacy, try to load modules
+    print(f"{Color.CYAN}[*] Attempting to load legacy iptables modules...{Color.RESET}")
+    
     modules = ['iptable_filter', 'iptable_nat', 'iptable_mangle', 'ip_tables']
     loaded = []
     failed = []
-    
-    print(f"{Color.CYAN}[*] Checking iptables kernel modules...{Color.RESET}")
     
     for module in modules:
         # Check if module is already loaded
@@ -115,16 +188,23 @@ def load_iptables_modules():
             print(f"{Color.GREEN}[✓] Loaded module: {module}{Color.RESET}")
         else:
             failed.append(module)
-            print(f"{Color.YELLOW}[!] Could not load: {module}{Color.RESET}")
     
-    if failed:
-        print(f"\n{Color.YELLOW}[!] Warning: Some modules failed to load: {', '.join(failed)}{Color.RESET}")
-        print(f"{Color.YELLOW}    This may be normal if you're using nftables{Color.RESET}")
-        print(f"{Color.CYAN}    Attempting to continue anyway...{Color.RESET}\n")
+    if failed and len(loaded) == 0:
+        # All modules failed - switch to nft
+        print(f"\n{Color.YELLOW}[!] Legacy iptables modules not available{Color.RESET}")
+        print(f"{Color.CYAN}[*] Switching to iptables-nft backend...{Color.RESET}")
+        switch_to_iptables_nft()
+        detect_iptables_backend()  # Re-detect after switch
+        return True
+    elif failed:
+        print(f"\n{Color.YELLOW}[!] Some modules unavailable: {', '.join(failed)}{Color.RESET}")
+        print(f"{Color.CYAN}[*] Will use nftables backend instead{Color.RESET}")
+        switch_to_iptables_nft()
+        detect_iptables_backend()
+        return True
     else:
-        print(f"{Color.GREEN}[✓] All iptables modules ready{Color.RESET}")
-    
-    return len(failed) == 0
+        print(f"{Color.GREEN}[✓] All legacy iptables modules loaded{Color.RESET}")
+        return True
 
 def ensure_iptables_legacy():
     """Ensure iptables-legacy is available and create modules config for boot"""
@@ -456,25 +536,24 @@ def start_transparent_proxy():
     print(f"{Color.CYAN}[*] Applying iptables rules...{Color.RESET}")
     rules_path = DATA_DIR / "iptables.rules"
     
-    # Flush existing rules
+    # Flush existing rules using detected backend
     try:
-        run_cmd("iptables -F")
-        run_cmd("iptables -X")
-        run_cmd("iptables -t nat -F")
-        run_cmd("iptables -t nat -X")
+        run_cmd(f"{IPTABLES_CMD} -F")
+        run_cmd(f"{IPTABLES_CMD} -X")
+        run_cmd(f"{IPTABLES_CMD} -t nat -F")
+        run_cmd(f"{IPTABLES_CMD} -t nat -X")
     except subprocess.CalledProcessError as e:
         print(f"{Color.YELLOW}[!] Warning: Could not flush iptables rules{Color.RESET}")
-        print(f"{Color.YELLOW}    This might be OK if you're using nftables{Color.RESET}")
         print(f"{Color.CYAN}    Attempting to continue...{Color.RESET}")
     
-    # Apply new rules
+    # Apply new rules using detected backend
     try:
-        run_cmd(f"iptables-restore < {rules_path}")
-        print(f"{Color.GREEN}[✓] iptables rules applied{Color.RESET}")
+        run_cmd(f"{IPTABLES_RESTORE_CMD} < {rules_path}")
+        print(f"{Color.GREEN}[✓] iptables rules applied using {IPTABLES_CMD}{Color.RESET}")
     except subprocess.CalledProcessError as e:
         print(f"{Color.RED}[✗] Failed to apply iptables rules{Color.RESET}")
-        print(f"{Color.YELLOW}[!] You may be using nftables instead of iptables{Color.RESET}")
-        print(f"{Color.YELLOW}[*] Try: sudo systemctl stop nftables && sudo systemctl disable nftables{Color.RESET}")
+        print(f"{Color.YELLOW}[!] Backend: {IPTABLES_CMD}{Color.RESET}")
+        print(f"{Color.YELLOW}[*] Try running: sudo t0rpoiz0n --setup{Color.RESET}")
         return False
     
     # Wait for Tor to bootstrap
@@ -516,24 +595,27 @@ def stop_transparent_proxy():
     print(f"{Color.CYAN}{Color.BOLD}[*] Stopping Transparent Proxy{Color.RESET}")
     print(f"{Color.CYAN}{'='*60}{Color.RESET}\n")
     
+    # Re-detect backend in case it changed
+    detect_iptables_backend()
+    
     # Stop Tor
     print(f"{Color.CYAN}[*] Stopping Tor service...{Color.RESET}")
     run_cmd("systemctl stop tor-t0rpoiz0n.service", check=False)
     print(f"{Color.GREEN}[✓] Tor stopped{Color.RESET}")
     
-    # Flush iptables
+    # Flush iptables using detected backend
     print(f"{Color.CYAN}[*] Flushing iptables rules...{Color.RESET}")
     try:
-        run_cmd("iptables -F")
-        run_cmd("iptables -X")
-        run_cmd("iptables -t nat -F")
-        run_cmd("iptables -t nat -X")
-        run_cmd("iptables -P INPUT ACCEPT")
-        run_cmd("iptables -P FORWARD ACCEPT")
-        run_cmd("iptables -P OUTPUT ACCEPT")
-        print(f"{Color.GREEN}[✓] iptables flushed{Color.RESET}")
+        run_cmd(f"{IPTABLES_CMD} -F")
+        run_cmd(f"{IPTABLES_CMD} -X")
+        run_cmd(f"{IPTABLES_CMD} -t nat -F")
+        run_cmd(f"{IPTABLES_CMD} -t nat -X")
+        run_cmd(f"{IPTABLES_CMD} -P INPUT ACCEPT")
+        run_cmd(f"{IPTABLES_CMD} -P FORWARD ACCEPT")
+        run_cmd(f"{IPTABLES_CMD} -P OUTPUT ACCEPT")
+        print(f"{Color.GREEN}[✓] iptables flushed using {IPTABLES_CMD}{Color.RESET}")
     except subprocess.CalledProcessError:
-        print(f"{Color.YELLOW}[!] Could not flush iptables (might be using nftables){Color.RESET}")
+        print(f"{Color.YELLOW}[!] Could not flush iptables{Color.RESET}")
     
     # Re-enable IPv6
     print(f"{Color.CYAN}[*] Re-enabling IPv6...{Color.RESET}")
@@ -573,6 +655,9 @@ def check_tor_status():
     print(f"{Color.CYAN}{Color.BOLD}[*] Checking Tor Status{Color.RESET}")
     print(f"{Color.CYAN}{'='*60}{Color.RESET}\n")
     
+    # Detect iptables backend for status display
+    detect_iptables_backend()
+    
     # Check service status
     result = run_cmd("systemctl is-active tor-t0rpoiz0n.service", check=False)
     
@@ -607,11 +692,13 @@ def check_tor_status():
         print(f"\n{Color.CYAN}[*] Latest bootstrap messages:{Color.RESET}")
         print(result.stdout.strip())
     
-    # Show iptables rule counts
-    print(f"\n{Color.CYAN}[*] iptables statistics:{Color.RESET}")
-    result = run_cmd("iptables -L -n -v | head -15", check=False)
+    # Show iptables rule counts using detected backend
+    print(f"\n{Color.CYAN}[*] iptables statistics (using {IPTABLES_CMD}):{Color.RESET}")
+    result = run_cmd(f"{IPTABLES_CMD} -L -n -v | head -15", check=False)
     if result.returncode == 0:
         print(result.stdout)
+    else:
+        print(f"{Color.YELLOW}[!] Could not retrieve iptables statistics{Color.RESET}")
     
     print(f"\n{Color.YELLOW}{'='*60}{Color.RESET}")
     print(f"{Color.YELLOW}[!] Testing Instructions:{Color.RESET}")
